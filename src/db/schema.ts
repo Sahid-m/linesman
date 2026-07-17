@@ -86,7 +86,9 @@ export const txlineCredentials = pgTable(
     check(
       "txline_credentials_duration_weeks_check",
       sql`(${table.setupState} = 'guest_created' AND ${table.durationWeeks} IS NULL)
-        OR (${table.setupState} IN ('subscribed', 'activated') AND ${table.durationWeeks} = 4)`,
+        OR (${table.setupState} IN ('subscribed', 'activated')
+          AND ${table.durationWeeks} IS NOT NULL
+          AND ${table.durationWeeks} = 4)`,
     ),
     check(
       "txline_credentials_service_level_check",

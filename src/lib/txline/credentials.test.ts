@@ -5,6 +5,11 @@ const dbMocks = vi.hoisted(() => ({
   values: vi.fn(),
   onConflictDoUpdate: vi.fn(),
 }));
+const networkMocks = vi.hoisted(() => ({
+  getNetworkConfig: vi.fn((network: "devnet" | "mainnet") => ({
+    serviceLevels: network === "devnet" ? [1] : [1, 12],
+  })),
+}));
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/db/client", () => ({
@@ -13,6 +18,7 @@ vi.mock("@/db/client", () => ({
 vi.mock("@/db/schema", () => ({
   txlineCredentials: { userId: {}, network: {} },
 }));
+vi.mock("@/lib/network/config", () => networkMocks);
 vi.mock("@/lib/security/encryption", () => ({
   decryptSecret: (value: string) => value,
   encryptSecret: (value: string) => `encrypted:${value}`,
@@ -53,6 +59,7 @@ describe("credential subscription boundaries", () => {
       .mockReset()
       .mockReturnValue({ onConflictDoUpdate: dbMocks.onConflictDoUpdate });
     dbMocks.onConflictDoUpdate.mockReset().mockResolvedValue(undefined);
+    networkMocks.getNetworkConfig.mockClear();
   });
 
   it.each([
@@ -108,6 +115,7 @@ describe("credential subscription boundaries", () => {
     const { upsertCredentialState } = await import("./credentials");
 
     await expect(upsertCredentialState(input)).resolves.toBeUndefined();
+    expect(networkMocks.getNetworkConfig).toHaveBeenCalledWith(input.network);
     expect(dbMocks.onConflictDoUpdate).toHaveBeenCalledOnce();
   });
 

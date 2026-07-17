@@ -27,7 +27,9 @@ CREATE TABLE "txline_credentials" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "txline_credentials_duration_weeks_check" CHECK (("txline_credentials"."setup_state" = 'guest_created' AND "txline_credentials"."duration_weeks" IS NULL)
-        OR ("txline_credentials"."setup_state" IN ('subscribed', 'activated') AND "txline_credentials"."duration_weeks" = 4)),
+        OR ("txline_credentials"."setup_state" IN ('subscribed', 'activated')
+          AND "txline_credentials"."duration_weeks" IS NOT NULL
+          AND "txline_credentials"."duration_weeks" = 4)),
 	CONSTRAINT "txline_credentials_service_level_check" CHECK (("txline_credentials"."setup_state" = 'guest_created' AND "txline_credentials"."service_level_id" IS NULL)
         OR ("txline_credentials"."setup_state" IN ('subscribed', 'activated')
           AND "txline_credentials"."network" = 'devnet'

@@ -2,7 +2,7 @@ import "server-only";
 
 import { getDb } from "@/db/client";
 import { txlineCredentials } from "@/db/schema";
-import type { Network } from "@/lib/network/config";
+import { getNetworkConfig, type Network } from "@/lib/network/config";
 import { decryptSecret, encryptSecret } from "@/lib/security/encryption";
 
 const MILLISECONDS_PER_WEEK = 7 * 24 * 60 * 60 * 1_000;
@@ -95,8 +95,7 @@ function validateSubscriptionBoundary(input: CredentialStateInput): void {
     throw new Error("Subscribed credentials require a four-week duration");
   }
 
-  const allowedServiceLevels =
-    input.network === "devnet" ? [1] : [1, 12];
+  const allowedServiceLevels = getNetworkConfig(input.network).serviceLevels;
   if (
     input.serviceLevelId == null ||
     !allowedServiceLevels.includes(input.serviceLevelId)

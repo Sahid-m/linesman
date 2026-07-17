@@ -1,5 +1,5 @@
 {
-  "id": "a304cd9b-589f-4621-878a-659d0cee2ee9",
+  "id": "4dcbfde6-84f5-4dc6-aa36-dcc70912ed5d",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -222,7 +222,7 @@
       "checkConstraints": {
         "txline_credentials_duration_weeks_check": {
           "name": "txline_credentials_duration_weeks_check",
-          "value": "(\"txline_credentials\".\"setup_state\" = 'guest_created' AND \"txline_credentials\".\"duration_weeks\" IS NULL)\n        OR (\"txline_credentials\".\"setup_state\" IN ('subscribed', 'activated') AND \"txline_credentials\".\"duration_weeks\" = 4)"
+          "value": "(\"txline_credentials\".\"setup_state\" = 'guest_created' AND \"txline_credentials\".\"duration_weeks\" IS NULL)\n        OR (\"txline_credentials\".\"setup_state\" IN ('subscribed', 'activated')\n          AND \"txline_credentials\".\"duration_weeks\" IS NOT NULL\n          AND \"txline_credentials\".\"duration_weeks\" = 4)"
         },
         "txline_credentials_service_level_check": {
           "name": "txline_credentials_service_level_check",
