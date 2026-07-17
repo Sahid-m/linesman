@@ -17,13 +17,23 @@ import { getNetworkConfig } from "@/lib/network/config";
 import { txlineFetch } from "@/lib/txline/client";
 import devnetIdl from "@/lib/txline/idl/devnet.json";
 import mainnetIdl from "@/lib/txline/idl/mainnet.json";
-import { formatStatValidationProof } from "@/lib/txline/validation";
+import {
+  assertProofMatchesRequest,
+  formatStatValidationProof,
+  validationComputeBudgetInstruction,
+} from "@/lib/txline/validation";
 
 const requestSchema = z.object({
   network: z.enum(["devnet", "mainnet"]),
-  fixtureId: z.number().int().positive(),
-  seq: z.number().int().nonnegative(),
-  statKeys: z.array(z.number().int().nonnegative()).min(1).max(8),
+  fixtureId: z.number().int().positive().safe(),
+  seq: z.number().int().nonnegative().safe(),
+  statKeys: z
+    .array(z.number().int().nonnegative().safe())
+    .min(1)
+    .max(8)
+    .refine((keys) => new Set(keys).size === keys.length, {
+      message: "Stat keys must be unique",
+    }),
 });
 
 export async function POST(request: Request) {
@@ -44,13 +54,7 @@ export async function POST(request: Request) {
     );
     if (!upstream.ok) throw new Error(`Proof request failed (${upstream.status})`);
     const formatted = formatStatValidationProof(await upstream.json());
-    if (
-      input.statKeys.some(
-        (key) => !formatted.statValues.some((stat) => stat.key === key),
-      )
-    ) {
-      throw new Error("Incomplete stat coverage");
-    }
+    assertProofMatchesRequest(formatted, input.fixtureId, input.statKeys);
 
     const config = getNetworkConfig(input.network);
     const idl = (input.network === "devnet" ? devnetIdl : mainnetIdl) as Idl;
@@ -74,12 +78,12 @@ export async function POST(request: Request) {
     );
     const valid = await program.methods
       .validateStatV2(formatted.payload, formatted.strategy)
+      .preInstructions([validationComputeBudgetInstruction()])
       .accounts({ dailyScoresMerkleRoots: dailyScoresPda })
       .view();
     return NextResponse.json({
       valid,
-      fixtureId: input.fixtureId,
-      seq: input.seq,
+      fixtureId: formatted.fixtureId,
       stats: formatted.statValues,
       timestamp: formatted.minTimestamp,
       epochDay,

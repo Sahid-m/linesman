@@ -34,3 +34,24 @@ export function parseSseBlock(block: string): SseMessage | null {
   }
   return hasField ? { id, event, retry, data: data.join("\n") } : null;
 }
+
+export class SseStreamDecoder {
+  private readonly decoder = new TextDecoder();
+  private buffer = "";
+
+  push(chunk: Uint8Array): SseMessage[] {
+    this.buffer += this.decoder.decode(chunk, { stream: true });
+    const blocks = this.buffer.split(/\r?\n\r?\n/);
+    this.buffer = blocks.pop() ?? "";
+    return blocks
+      .map((block) => parseSseBlock(block))
+      .filter((message): message is SseMessage => message !== null);
+  }
+
+  finish(): SseMessage[] {
+    this.buffer += this.decoder.decode();
+    const message = parseSseBlock(this.buffer);
+    this.buffer = "";
+    return message ? [message] : [];
+  }
+}

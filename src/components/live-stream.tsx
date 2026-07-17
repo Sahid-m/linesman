@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useNetwork } from "@/components/app-providers";
-import { parseSseBlock, type SseMessage } from "@/lib/txline/sse";
+import { SseStreamDecoder, type SseMessage } from "@/lib/txline/sse";
 import { normalizeScoreEvent, type TxlineEvent } from "@/lib/txline/types";
 
 type StreamState =
@@ -50,25 +50,22 @@ function StreamPanel({
         reconnectAttempt = 0;
         markIdleLater();
         const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        while (!controller.signal.aborted) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const blocks = buffer.split(/\r?\n\r?\n/);
-          buffer = blocks.pop() ?? "";
-          for (const block of blocks) {
-            const message = parseSseBlock(block);
-            if (!message) {
-              markIdleLater();
-              continue;
-            }
+        const parser = new SseStreamDecoder();
+        const consumeMessages = (messages: SseMessage[]) => {
+          for (const message of messages) {
             if (message.id) lastId.current = message.id;
             setStatus("live");
             markIdleLater();
             setEvents((current) => [...current, message].slice(-250));
           }
+        };
+        while (!controller.signal.aborted) {
+          const { done, value } = await reader.read();
+          if (done) {
+            consumeMessages(parser.finish());
+            break;
+          }
+          consumeMessages(parser.push(value));
         }
         if (!controller.signal.aborted) throw new Error("Stream ended");
       } catch {

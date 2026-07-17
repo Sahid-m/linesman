@@ -1,13 +1,8 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 
 import { requireSession } from "@/lib/auth/session";
 import { txlineFetch } from "@/lib/txline/client";
-
-const inputSchema = z.object({
-  network: z.enum(["devnet", "mainnet"]),
-  fixtureId: z.coerce.number().int().positive().safe(),
-});
+import { parseFixtureRouteInput } from "@/lib/txline/route-input";
 
 export async function GET(
   request: Request,
@@ -15,11 +10,11 @@ export async function GET(
 ) {
   try {
     const session = await requireSession();
-    const { fixtureId } = await context.params;
-    const { network } = inputSchema.parse({
-      fixtureId,
-      network: new URL(request.url).searchParams.get("network"),
-    });
+    const params = await context.params;
+    const { network, fixtureId } = parseFixtureRouteInput(
+      new URL(request.url).searchParams.get("network"),
+      params.fixtureId,
+    );
     const upstream = await txlineFetch(
       session.userId,
       network,

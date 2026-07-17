@@ -1,4 +1,5 @@
 import BN from "bn.js";
+import { ComputeBudgetProgram } from "@solana/web3.js";
 
 type ProofNode = { hash: number[]; isRightSibling: boolean };
 type ScoreStat = { key: number; value: number; period: number };
@@ -59,6 +60,7 @@ export function formatStatValidationProof(value: unknown) {
   const proof = record(value, "response");
   const summary = record(proof.summary, "summary");
   const updateStats = record(summary.updateStats, "summary.updateStats");
+  const fixtureId = numberField(summary, "fixtureId", "summary.fixtureId");
   const minTimestamp = numberField(
     updateStats,
     "minTimestamp",
@@ -86,14 +88,13 @@ export function formatStatValidationProof(value: unknown) {
     proofNodes(nodes, `statProofs[${index}]`),
   );
   return {
+    fixtureId,
     minTimestamp,
     statValues: stats.map((stat) => ({ key: stat.key, value: stat.value })),
     payload: {
       ts: new BN(minTimestamp),
       fixtureSummary: {
-        fixtureId: new BN(
-          numberField(summary, "fixtureId", "summary.fixtureId"),
-        ),
+        fixtureId: new BN(fixtureId),
         updateStats: {
           updateCount: numberField(
             updateStats,
@@ -141,4 +142,29 @@ export function formatStatValidationProof(value: unknown) {
       stats: statProofs.map((nodes) => nodes.length),
     },
   };
+}
+
+export function assertProofMatchesRequest(
+  proof: ReturnType<typeof formatStatValidationProof>,
+  fixtureId: number,
+  statKeys: readonly number[],
+): void {
+  if (proof.fixtureId !== fixtureId) {
+    throw new Error("Proof fixture does not match requested fixture");
+  }
+  const proofKeys = proof.statValues.map((stat) => stat.key);
+  if (
+    new Set(statKeys).size !== statKeys.length ||
+    new Set(proofKeys).size !== proofKeys.length ||
+    proofKeys.length !== statKeys.length ||
+    [...proofKeys].sort((a, b) => a - b).some(
+      (key, index) => key !== [...statKeys].sort((a, b) => a - b)[index],
+    )
+  ) {
+    throw new Error("Incomplete stat coverage");
+  }
+}
+
+export function validationComputeBudgetInstruction() {
+  return ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 });
 }

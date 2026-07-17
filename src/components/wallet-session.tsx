@@ -1,8 +1,11 @@
 "use client";
 
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
+import { LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
 import { useEffect, useState, useSyncExternalStore } from "react";
+
+import { useNetwork } from "@/components/app-providers";
 
 type Session = { userId: string; walletPublicKey: string };
 
@@ -10,6 +13,8 @@ type TestWallet = {
   publicKey: string;
   signMessage: (message: Uint8Array) => Promise<Uint8Array>;
 };
+
+type Balance = { identity: string; sol: number };
 
 function base64(bytes: Uint8Array): string {
   let binary = "";
@@ -30,12 +35,15 @@ export function WalletSession({
 }: {
   onSession: (session: Session | null) => void;
 }) {
+  const { connection } = useConnection();
+  const { network } = useNetwork();
   const wallet = useWallet();
   const { setVisible } = useWalletModal();
   const [testConnected, setTestConnected] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const [balance, setBalance] = useState<Balance>();
   const hydrated = useSyncExternalStore(
     () => () => undefined,
     () => true,
@@ -46,6 +54,14 @@ export function WalletSession({
   const publicKey =
     (testConnected ? testWallet?.publicKey : undefined) ??
     wallet.publicKey?.toBase58();
+  const walletMismatch = Boolean(
+    session && publicKey && session.walletPublicKey !== publicKey,
+  );
+  const authenticatedSession =
+    session && !walletMismatch ? session : null;
+  const balanceIdentity = `${network}:${publicKey ?? ""}`;
+  const displayedBalance =
+    balance?.identity === balanceIdentity ? balance.sol : undefined;
 
   useEffect(() => {
     fetch("/api/auth/session")
@@ -54,10 +70,55 @@ export function WalletSession({
       )
       .then((value) => {
         setSession(value);
-        onSession(value);
       })
       .catch(() => undefined);
-  }, [onSession]);
+  }, []);
+
+  useEffect(() => {
+    if (walletMismatch) {
+      onSession(null);
+      void fetch("/api/auth/logout", { method: "POST" })
+        .then((response) => {
+          if (!response.ok) throw new Error("Logout failed");
+          setSession(null);
+        })
+        .catch(() => {
+          setSession(null);
+          setError("Could not revoke the previous wallet session.");
+        });
+      return;
+    }
+    onSession(session);
+  }, [onSession, session, walletMismatch]);
+
+  useEffect(() => {
+    let current = true;
+    if (!publicKey) return () => {
+      current = false;
+    };
+    let key: PublicKey;
+    try {
+      key = new PublicKey(publicKey);
+    } catch {
+      return () => {
+        current = false;
+      };
+    }
+    void connection
+      .getBalance(key, "confirmed")
+      .then((lamports) => {
+        if (current) {
+          setBalance({
+            identity: balanceIdentity,
+            sol: lamports / LAMPORTS_PER_SOL,
+          });
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      current = false;
+    };
+  }, [balanceIdentity, connection, publicKey]);
 
   async function signIn() {
     if (!publicKey) return;
@@ -101,7 +162,6 @@ export function WalletSession({
       };
       if (!verifyResponse.ok) throw new Error(result.error);
       setSession(result);
-      onSession(result);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Sign-in failed");
     } finally {
@@ -112,7 +172,6 @@ export function WalletSession({
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
     setSession(null);
-    onSession(null);
   }
 
   return (
@@ -128,18 +187,27 @@ export function WalletSession({
         >
           Connect wallet
         </button>
-      ) : session ? (
+      ) : authenticatedSession ? (
         <>
-          <p>Signed in as {session.walletPublicKey}</p>
+          <p>Signed in as {authenticatedSession.walletPublicKey}</p>
+          {displayedBalance !== undefined && (
+            <p>{displayedBalance.toLocaleString(undefined, { maximumFractionDigits: 4 })} SOL on {network}</p>
+          )}
           <button onClick={logout}>Log out</button>
         </>
       ) : (
         <>
           <p>{publicKey}</p>
-          <button disabled={busy} onClick={signIn}>
+          {displayedBalance !== undefined && (
+            <p>{displayedBalance.toLocaleString(undefined, { maximumFractionDigits: 4 })} SOL on {network}</p>
+          )}
+          <button disabled={busy || walletMismatch} onClick={signIn}>
             {busy ? "Signing in…" : "Sign in"}
           </button>
         </>
+      )}
+      {walletMismatch && (
+        <p role="alert">Wallet changed. Revoking the previous session…</p>
       )}
       {error && <p role="alert">{error}</p>}
     </section>

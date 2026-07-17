@@ -1,3 +1,4 @@
+import type { Idl } from "@coral-xyz/anchor";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { NextResponse } from "next/server";
 import { z } from "zod";
@@ -13,6 +14,12 @@ import {
   getCredential,
   upsertCredentialState,
 } from "@/lib/txline/credentials";
+import devnetIdl from "@/lib/txline/idl/devnet.json";
+import mainnetIdl from "@/lib/txline/idl/mainnet.json";
+import {
+  assertActivationMessageTransition,
+  verifySubscriptionTransaction,
+} from "@/lib/txline/setup-verification";
 
 const requestSchema = z.object({
   network: z.enum(["devnet", "mainnet"]),
@@ -32,6 +39,11 @@ export async function POST(request: Request) {
     }
     const credential = await getCredential(session.userId, input.network);
     if (!credential) throw new Error("Create a guest credential first");
+    const transition = assertActivationMessageTransition(
+      credential,
+      input.txSignature,
+      input.serviceLevelId,
+    );
 
     const transaction = await new Connection(config.rpcUrl, "confirmed")
       .getParsedTransaction(input.txSignature, {
@@ -42,31 +54,35 @@ export async function POST(request: Request) {
       throw new Error("Subscription transaction is not confirmed");
     }
     const wallet = new PublicKey(session.walletPublicKey);
-    const signedByWallet = transaction.transaction.message.accountKeys.some(
-      (account) => account.signer && account.pubkey.equals(wallet),
-    );
-    if (!signedByWallet) {
-      throw new Error("Authenticated wallet did not sign this transaction");
-    }
-    const invokesProgram =
-      transaction.transaction.message.instructions.some(
-        (instruction) => instruction.programId.equals(new PublicKey(config.programId)),
-      );
-    if (!invokesProgram) throw new Error("Transaction does not invoke TxLINE");
-
-    const subscriptionCreatedAt = new Date(
-      (transaction.blockTime ?? Math.floor(Date.now() / 1_000)) * 1_000,
-    );
-    await upsertCredentialState({
-      userId: session.userId,
-      network: input.network,
-      jwt: credential.jwt,
-      setupState: "subscribed",
-      subscriptionTxSignature: input.txSignature,
+    const idl = (
+      input.network === "devnet" ? devnetIdl : mainnetIdl
+    ) as Idl;
+    verifySubscriptionTransaction({
+      instructions: transaction.transaction.message.instructions,
+      signerKeys: transaction.transaction.message.accountKeys
+        .filter((account) => account.signer)
+        .map((account) => account.pubkey),
+      wallet,
+      config,
+      idl,
       serviceLevelId: input.serviceLevelId,
-      durationWeeks: 4,
-      subscriptionCreatedAt,
     });
+
+    if (transition === "initial") {
+      const subscriptionCreatedAt = new Date(
+        (transaction.blockTime ?? Math.floor(Date.now() / 1_000)) * 1_000,
+      );
+      await upsertCredentialState({
+        userId: session.userId,
+        network: input.network,
+        jwt: credential.jwt,
+        setupState: "subscribed",
+        subscriptionTxSignature: input.txSignature,
+        serviceLevelId: input.serviceLevelId,
+        durationWeeks: 4,
+        subscriptionCreatedAt,
+      });
+    }
     return NextResponse.json({
       message: buildActivationMessage(input.txSignature, credential.jwt),
     });
