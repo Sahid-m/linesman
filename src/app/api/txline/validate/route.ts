@@ -84,6 +84,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       valid,
       fixtureId: formatted.fixtureId,
+      requestedSeq: input.seq,
       stats: formatted.statValues,
       timestamp: formatted.minTimestamp,
       epochDay,
