@@ -51,7 +51,7 @@ async function gatherVenueSnapshots(
     fetchSxBetPrice(ctx.teams).catch(() => null),
     fetchKalshiPrice(ctx.teams).catch(() => null),
   ]);
-  return [poly, sx].filter((price): price is VenuePrice => price !== null);
+  return [poly, sx, kalshi].filter((price): price is VenuePrice => price !== null);
 }
 
 function impliedPctForSide(
