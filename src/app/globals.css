@@ -590,9 +590,76 @@ footer {
   background: transparent;
 }
 
-/* Wallet modal — override default purple/dark adapter chrome */
+/* Connect-wallet dialog (Linesman chrome) — keep feature-card readable on dark surface */
+.connect-modal .feature-card {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  padding: 14px 16px;
+  box-shadow: none;
+  color: var(--color-text);
+}
+
+.connect-modal .feature-card h2,
+.connect-modal .feature-card h3 {
+  color: var(--color-text);
+  font-size: 0.95rem;
+  margin: 0 0 10px;
+}
+
+.connect-modal .feature-card button {
+  border-radius: 10px;
+  border: none;
+  background: var(--color-accent);
+  color: var(--color-bg);
+  font-weight: 600;
+  padding: 0.65rem 1rem;
+}
+
+.connect-modal .feature-card button:disabled {
+  opacity: 0.45;
+}
+
+.connect-modal .feature-card .button-secondary {
+  background: transparent;
+  color: var(--color-muted);
+  border: 1px solid var(--color-border);
+}
+
+.connect-modal .feature-card select {
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.connect-modal .feature-card code,
+.connect-modal .feature-card pre {
+  background: var(--color-surface-raised);
+  color: var(--color-accent);
+}
+
+.connect-modal .feature-card p,
+.connect-modal .setup-steps {
+  color: var(--color-muted);
+}
+
+.connect-modal .feature-card .success {
+  color: var(--color-accent);
+}
+
+.connect-modal .setup-steps {
+  padding-left: 1.1rem;
+  margin: 0 0 12px;
+}
+
+.connect-modal .setup-steps li[data-complete="true"] {
+  color: var(--color-accent);
+}
+
+/* Wallet adapter picker must sit above our connect dialog */
 .wallet-adapter-modal-wrapper {
-  z-index: 1000;
+  z-index: 1100;
   background: rgba(16, 32, 58, 0.45);
   backdrop-filter: blur(4px);
 }

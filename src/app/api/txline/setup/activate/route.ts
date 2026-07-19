@@ -14,6 +14,7 @@ import {
   getCredential,
   upsertCredentialState,
 } from "@/lib/txline/credentials";
+import { clearLiveIdentityCache } from "@/lib/sources/manager";
 
 const requestSchema = z.object({
   network: z.enum(["devnet", "mainnet"]),
@@ -156,6 +157,7 @@ export async function POST(request: Request) {
           durationWeeks: 4,
           subscriptionCreatedAt: credential.subscriptionCreatedAt,
         });
+        clearLiveIdentityCache();
         return NextResponse.json({ state: "activated", network });
       }
       lastDetail = result.detail;

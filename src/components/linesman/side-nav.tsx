@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { ConnectWalletControl } from "@/components/linesman/connect-wallet-modal";
 import { useViewportStore } from "@/lib/store/viewport-store";
 
 const TABS = [
   { href: "/feed", label: "Edge Feed", icon: "⚡" },
   { href: "/watchdog", label: "Watchdog", icon: "🛡" },
+  { href: "/agent", label: "Agent", icon: "◎" },
   { href: "/replay", label: "Replay", icon: "⏱" },
 ] as const;
 
@@ -23,7 +25,9 @@ export function SideNav() {
       <Link href="/feed" className="font-display text-2xl tracking-wide text-[color:var(--color-text)]">
         LINES<span style={{ color: "var(--color-accent)" }}>MAN</span>
       </Link>
-      <p className="mt-1 text-xs text-[color:var(--color-muted)]">Sharp line vs the market</p>
+      <p className="mt-1 text-xs text-[color:var(--color-muted)]">
+        Sharp line · venue lag · on-chain proof
+      </p>
 
       <div className="mt-10 flex flex-col gap-1.5">
         {TABS.map((tab) => {
@@ -70,9 +74,12 @@ export function SideNav() {
         </div>
       </div>
 
-      <div className="mt-auto rounded-xl border border-[color:var(--color-border)] p-3.5 text-xs text-[color:var(--color-muted)]">
-        Every number traces to a Merkle-anchored TxLINE packet on Solana — tap any card&rsquo;s verify strip for the
-        receipt.
+      <div className="mt-auto space-y-3">
+        <ConnectWalletControl variant="nav" />
+        <div className="rounded-xl border border-[color:var(--color-border)] p-3.5 text-xs text-[color:var(--color-muted)]">
+          Every number traces to a Merkle-anchored TxLINE packet on Solana — tap any card&rsquo;s verify strip for the
+          receipt.
+        </div>
       </div>
     </nav>
   );

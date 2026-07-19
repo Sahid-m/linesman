@@ -2,7 +2,7 @@ import "server-only";
 
 import { getCredential } from "@/lib/txline/credentials";
 import { txlineFetch } from "@/lib/txline/client";
-import { fixturesFrom } from "@/lib/txline/fixtures";
+import { fixturesFrom, replayWindowStartEpochDay } from "@/lib/txline/fixtures";
 import { decodeOddsMessage } from "@/lib/txline/odds-format";
 import type { Network } from "@/lib/network/config";
 import type { SharpLine, Team } from "@/lib/types";
@@ -39,6 +39,99 @@ async function fetchJson(userId: string, network: Network, path: string): Promis
   return res.json();
 }
 
+function fixturePriority(fixture: { competition: string; gameState: number | null }): number {
+  // World Cup books with prices often sit past the "live friendlies" cluster —
+  // rank them first so we don't stop after 10 empty snapshots.
+  let score = 0;
+  if (/world\s*cup/i.test(fixture.competition)) score += 100;
+  if ((fixture.gameState ?? 0) > 0) score += 10;
+  return score;
+}
+
+function sharpLinesFromOddsPayload(input: {
+  fixtureId: number;
+  competition: string;
+  home?: string;
+  away?: string;
+  kickoffTime: number | null;
+  network: Network;
+  oddsPayload: unknown;
+}): SharpLine[] {
+  const rawTicks = Array.isArray(input.oddsPayload) ? input.oddsPayload : [input.oddsPayload];
+  if (rawTicks.length === 0) return [];
+
+  const home = input.home;
+  const away = input.away;
+  const homeTeam = teamFromName(home, "Home");
+  const awayTeam = teamFromName(away, "Away");
+  const ticks = rawTicks
+    .map((raw) => decodeOddsMessage(raw, { home, away }))
+    .filter((tick): tick is NonNullable<typeof tick> => !!tick && tick.marketType === "1X2_PARTICIPANT_RESULT");
+  const fullMatch = ticks.filter((tick) => !tick.period || tick.period === "Full match");
+  const chosen = fullMatch.length > 0 ? fullMatch : ticks;
+
+  const lines: SharpLine[] = [];
+  for (const tick of chosen) {
+    for (const selection of tick.selections) {
+      if (selection.decimalOdds === null && selection.impliedPct === null) continue;
+      const impliedProb =
+        selection.impliedPct != null
+          ? selection.impliedPct / 100
+          : selection.decimalOdds
+            ? 1 / selection.decimalOdds
+            : null;
+      if (impliedProb === null || !Number.isFinite(impliedProb) || impliedProb <= 0) continue;
+
+      lines.push({
+        outcomeId: `txl-${input.fixtureId}:1x2:${selection.key}`,
+        fixtureId: `txl-${input.fixtureId}`,
+        competition: input.competition,
+        homeTeam,
+        awayTeam,
+        market: "1x2",
+        selectionLabel: selection.label,
+        decimalOdds: selection.decimalOdds ?? 1 / impliedProb,
+        impliedProb,
+        fairProb: impliedProb,
+        packetTimestamp: tick.timestamp,
+        proofRef: { network: input.network, epochDay: Math.floor(tick.timestamp / 86_400_000) },
+        kickoffTime: input.kickoffTime ?? tick.timestamp,
+        isLive: tick.inRunning,
+      });
+    }
+  }
+  return lines;
+}
+
+/** Sharp lines for one fixture (previous-focus or live). Empty array if odds snapshot is blank. */
+export async function getSharpLinesForFixture(
+  userId: string,
+  network: Network,
+  fixture: {
+    id: number;
+    home: string;
+    away: string;
+    competition?: string;
+    kickoffTime?: number | null;
+  },
+): Promise<SharpLine[]> {
+  const credential = await getCredential(userId, network);
+  if (!credential || credential.setupState !== "activated") {
+    throw new LiveTxlineUnavailableError("TxLINE is not activated for this session/network");
+  }
+
+  const oddsPayload = await fetchJson(userId, network, `/api/odds/snapshot/${fixture.id}`);
+  return sharpLinesFromOddsPayload({
+    fixtureId: fixture.id,
+    competition: fixture.competition ?? "World Cup",
+    home: fixture.home,
+    away: fixture.away,
+    kickoffTime: fixture.kickoffTime ?? null,
+    network,
+    oddsPayload,
+  });
+}
+
 /**
  * Best-effort real sharp lines for whatever TxLINE is currently covering.
  * These are genuinely live match-odds for real fixtures — NOT the curated
@@ -51,56 +144,40 @@ export async function getLiveSharpLines(userId: string, network: Network): Promi
     throw new LiveTxlineUnavailableError("TxLINE is not activated for this session/network");
   }
 
-  const fixturesPayload = await fetchJson(userId, network, "/api/fixtures/snapshot");
+  const startEpochDay = replayWindowStartEpochDay();
+  const fixturesPayload = await fetchJson(
+    userId,
+    network,
+    `/api/fixtures/snapshot?startEpochDay=${startEpochDay}`,
+  );
   const allFixtures = fixturesFrom(fixturesPayload);
-  const liveFixtures = allFixtures.filter((fixture) => (fixture.gameState ?? 0) > 0);
-  const candidates = (liveFixtures.length > 0 ? liveFixtures : allFixtures).slice(0, 10);
-  if (candidates.length === 0) {
+  if (allFixtures.length === 0) {
     throw new LiveTxlineUnavailableError("TxLINE returned no fixtures");
   }
+
+  // Probe a wide window: many fixtures return [] odds snapshots; the priced
+  // World Cup books are often outside the first handful of "live" friendlies.
+  const candidates = [...allFixtures]
+    .sort((a, b) => fixturePriority(b) - fixturePriority(a))
+    .slice(0, 40);
 
   const lines: SharpLine[] = [];
   await Promise.all(
     candidates.map(async (fixture) => {
       try {
         const oddsPayload = await fetchJson(userId, network, `/api/odds/snapshot/${fixture.id}`);
-        const rawTicks = Array.isArray(oddsPayload) ? oddsPayload : [oddsPayload];
         const { home, away } = splitMatchup(fixture.label);
-        const homeTeam = teamFromName(home, "Home");
-        const awayTeam = teamFromName(away, "Away");
-
-        for (const raw of rawTicks) {
-          const tick = decodeOddsMessage(raw, { home, away });
-          if (!tick || tick.marketType !== "1X2_PARTICIPANT_RESULT") continue;
-
-          for (const selection of tick.selections) {
-            if (selection.decimalOdds === null && selection.impliedPct === null) continue;
-            const impliedProb =
-              selection.impliedPct != null
-                ? selection.impliedPct / 100
-                : selection.decimalOdds
-                  ? 1 / selection.decimalOdds
-                  : null;
-            if (impliedProb === null || !Number.isFinite(impliedProb) || impliedProb <= 0) continue;
-
-            lines.push({
-              outcomeId: `txl-${fixture.id}:1x2:${selection.key}`,
-              fixtureId: `txl-${fixture.id}`,
-              competition: fixture.competition,
-              homeTeam,
-              awayTeam,
-              market: "1x2",
-              selectionLabel: selection.label,
-              decimalOdds: selection.decimalOdds ?? 1 / impliedProb,
-              impliedProb,
-              fairProb: impliedProb, // devig runs downstream in the manager, same as mock/replay
-              packetTimestamp: tick.timestamp,
-              proofRef: { network, epochDay: Math.floor(tick.timestamp / 86_400_000) },
-              kickoffTime: fixture.startTime ?? tick.timestamp,
-              isLive: tick.inRunning,
-            });
-          }
-        }
+        lines.push(
+          ...sharpLinesFromOddsPayload({
+            fixtureId: fixture.id,
+            competition: fixture.competition,
+            home,
+            away,
+            kickoffTime: fixture.startTime,
+            network,
+            oddsPayload,
+          }),
+        );
       } catch {
         // One fixture's odds failing shouldn't drop the whole live snapshot.
       }

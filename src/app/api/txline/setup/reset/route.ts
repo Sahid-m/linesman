@@ -8,6 +8,7 @@ import {
 } from "@/lib/auth/session";
 import { getNetworkConfig } from "@/lib/network/config";
 import { resetCredentialForResubscribe } from "@/lib/txline/credentials";
+import { clearLiveIdentityCache } from "@/lib/sources/manager";
 
 const requestSchema = z.object({
   network: z.enum(["devnet", "mainnet"]),
@@ -40,6 +41,7 @@ export async function POST(request: Request) {
       network,
       jwt,
     });
+    clearLiveIdentityCache();
     return NextResponse.json({ state: "guest_created", network });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Reset failed";

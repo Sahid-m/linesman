@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, type ReactNode } from "react";
+import { Suspense, useState, type ReactNode } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useViewportStore } from "@/lib/store/viewport-store";
 
@@ -35,9 +35,13 @@ function ViewportFrameInner({ children }: { children: ReactNode }) {
   const isPhone = urlView === "phone" || storeMode === "phone";
   if (!isPhone) return <>{children}</>;
 
-  const frameParams = new URLSearchParams(searchParams);
-  frameParams.set("view", "desktop");
-  const src = `${pathname}?${frameParams.toString()}`;
+  // Seed the iframe once; in-frame Next.js routing handles Feed/Watchdog/Replay.
+  // Changing src on every parent navigation was remounting the frame and freezing the sim at '0.
+  const [frameSrc] = useState(() => {
+    const frameParams = new URLSearchParams(searchParams.toString());
+    frameParams.set("view", "desktop");
+    return `${pathname}?${frameParams.toString()}`;
+  });
 
   return (
     <div className="flex min-h-[70vh] flex-col items-center justify-center gap-4 py-10">
@@ -54,8 +58,7 @@ function ViewportFrameInner({ children }: { children: ReactNode }) {
       >
         <div className="absolute left-1/2 top-0 z-10 h-6 w-32 -translate-x-1/2 rounded-b-2xl bg-[#1a1e27]" />
         <iframe
-          key={src}
-          src={src}
+          src={frameSrc}
           title="Linesman — phone preview"
           className="h-full w-full border-0"
           style={{ colorScheme: "dark" }}

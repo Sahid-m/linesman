@@ -3,22 +3,44 @@
 import { useState } from "react";
 import useSWR from "swr";
 import type { SourceStatus } from "@/lib/sources/manager";
+import { useVenueSimStore } from "@/lib/store/venue-sim-store";
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
+function formatClock(atMs: number, kickoffMs: number): string {
+  const minute = Math.max(0, Math.round((atMs - kickoffMs) / 60_000));
+  return `'${minute} · ${new Date(atMs).toISOString().slice(11, 16)} UTC`;
+}
+
 export function ShowcaseBanner() {
   const [dismissed, setDismissed] = useState(false);
-  const { data } = useSWR<{ status: SourceStatus }>("/api/status", fetcher, {
-    refreshInterval: 15_000,
-  });
+  const atMs = useVenueSimStore((state) => state.atMs);
+  const kickoffMs = useVenueSimStore((state) => state.kickoffMs);
+  const label = useVenueSimStore((state) => state.label);
+  const playing = useVenueSimStore((state) => state.playing);
+  const speed = useVenueSimStore((state) => state.speed);
+  const { data } = useSWR<{ status: SourceStatus }>(
+    atMs != null ? `/api/status?atMs=${atMs}` : "/api/status",
+    fetcher,
+    { refreshInterval: playing ? 0 : 15_000 },
+  );
   const status = data?.status;
 
-  if (!status || status.mode === "live" || dismissed) return null;
+  if (dismissed) return null;
 
-  const isReplay = status.mode === "replay";
-  const message = isReplay
-    ? "▶ Replaying real TxLINE data from the World Cup Final weekend"
-    : "▶ Showcase mode — seeded demo data. Connect a wallet on /starter for live odds.";
+  const simActive = label && atMs != null && kickoffMs != null;
+  if (!simActive && (!status || status.mode === "live")) return null;
+
+  const isReplay = simActive || status?.mode === "replay";
+  const message = simActive
+    ? `${playing ? "▶" : "❙❙"} Simulating 1m PM+Kalshi — ${label} · ${formatClock(atMs, kickoffMs)} · ${speed}×`
+    : status?.detail?.startsWith("Simulating")
+      ? `▶ ${status.detail}`
+      : status?.mode === "replay"
+        ? "▶ Replaying a pinned previous fixture"
+        : status?.liveTxlineConnected
+          ? "▶ TxLINE connected — waiting for a venue book to match"
+          : "▶ Showcase mode — seeded demo data. Use Connect wallet for live odds.";
 
   return (
     <div

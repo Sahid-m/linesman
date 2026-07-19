@@ -35,6 +35,28 @@ export function parseSseBlock(block: string): SseMessage | null {
   return hasField ? { id, event, retry, data: data.join("\n") } : null;
 }
 
+/**
+ * Parses a fully-buffered body of newline-joined `data: {...}` lines (the
+ * shape TxLINE's historical endpoints return) into their JSON payloads.
+ * Unlike `SseStreamDecoder`, this doesn't assume blank-line-separated
+ * multi-line blocks — each record is a single `data:` line.
+ */
+export function parseSseDataLines(text: string): unknown[] {
+  const records: unknown[] = [];
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line.startsWith("data:")) continue;
+    const payload = line.slice(5).trim();
+    if (!payload) continue;
+    try {
+      records.push(JSON.parse(payload));
+    } catch {
+      // Skip malformed lines rather than failing the whole response.
+    }
+  }
+  return records;
+}
+
 export class SseStreamDecoder {
   private readonly decoder = new TextDecoder();
   private buffer = "";

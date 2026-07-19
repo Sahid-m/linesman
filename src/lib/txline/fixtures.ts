@@ -99,3 +99,12 @@ export function isHistoricalReplayEligible(
   const latest = now - 6 * 60 * 60 * 1_000;
   return startTimeMs >= earliest && startTimeMs <= latest;
 }
+
+/**
+ * `/api/fixtures/snapshot` defaults to "today forward" — without an explicit
+ * `startEpochDay` it never returns fixtures that already kicked off on a
+ * previous UTC day, even ones still inside the replay window.
+ */
+export function replayWindowStartEpochDay(now = Date.now()): number {
+  return Math.floor((now - 14 * 24 * 60 * 60 * 1_000) / 86_400_000);
+}

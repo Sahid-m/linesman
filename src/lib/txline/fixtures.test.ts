@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fixturesFrom, isHistoricalReplayEligible } from "./fixtures";
+import { fixturesFrom, isHistoricalReplayEligible, replayWindowStartEpochDay } from "./fixtures";
 
 describe("fixturesFrom", () => {
   it("maps TxLINE Participant fields into labels", () => {
@@ -30,5 +30,14 @@ describe("isHistoricalReplayEligible", () => {
       true,
     );
     expect(isHistoricalReplayEligible(now - 60 * 60 * 1_000, now)).toBe(false);
+  });
+});
+
+describe("replayWindowStartEpochDay", () => {
+  it("is fourteen days before now in epoch days", () => {
+    const now = Date.UTC(2026, 6, 19, 12, 0, 0);
+    expect(replayWindowStartEpochDay(now)).toBe(
+      Math.floor((now - 14 * 24 * 60 * 60 * 1_000) / 86_400_000),
+    );
   });
 });

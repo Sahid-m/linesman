@@ -3,6 +3,7 @@ import {
   index,
   integer,
   jsonb,
+  numeric,
   pgEnum,
   pgTable,
   text,
@@ -10,7 +11,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
-import { sql } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 
 export const network = pgEnum("network", ["devnet", "mainnet"]);
 
@@ -139,4 +140,95 @@ export const venueSnapshots = pgTable(
   (table) => [
     index("venue_snapshots_recording_id_ts_idx").on(table.recordingId, table.ts),
   ],
+);
+
+export const agentPositionSide = pgEnum("agent_position_side", [
+  "home",
+  "away",
+]);
+
+export const agentPositionMode = pgEnum("agent_position_mode", [
+  "live",
+  "replay",
+]);
+
+export const agentPositionStatus = pgEnum("agent_position_status", [
+  "open",
+  "graded",
+]);
+
+/**
+ * One agent decision per detected ground-truth event (goal/card), sized
+ * against the slowest venue at the fastest reactor's fair value. Graded
+ * against a validateStatV2 receipt once the fixture reaches full-time.
+ */
+export const agentPositions = pgTable(
+  "agent_positions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    network: network("network").notNull(),
+    fixtureId: integer("fixture_id").notNull(),
+    mode: agentPositionMode("mode").notNull(),
+    eventSeq: integer("event_seq").notNull(),
+    eventAction: text("event_action").notNull(),
+    side: agentPositionSide("side").notNull(),
+    counterpartyVenue: text("counterparty_venue").notNull(),
+    size: numeric("size", { precision: 12, scale: 4 }).notNull(),
+    entryFairValue: numeric("entry_fair_value", {
+      precision: 6,
+      scale: 4,
+    }).notNull(),
+    memoTxSignature: text("memo_tx_signature"),
+    rationale: text("rationale"),
+    status: agentPositionStatus("status").notNull().default("open"),
+    settledFairValue: numeric("settled_fair_value", {
+      precision: 6,
+      scale: 4,
+    }),
+    proofReceipt: jsonb("proof_receipt"),
+    pnl: numeric("pnl", { precision: 12, scale: 4 }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    gradedAt: timestamp("graded_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("agent_positions_fixture_seq_side_unique").on(
+      table.fixtureId,
+      table.eventSeq,
+      table.side,
+    ),
+  ],
+);
+
+/** Cross-venue price snapshot at the moment of each agent decision. */
+export const agentVenueObservations = pgTable("agent_venue_observations", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  positionId: uuid("position_id")
+    .notNull()
+    .references(() => agentPositions.id, { onDelete: "cascade" }),
+  venue: text("venue").notNull(),
+  bookmaker: text("bookmaker"),
+  homeImpliedPct: numeric("home_implied_pct", { precision: 6, scale: 4 }),
+  awayImpliedPct: numeric("away_implied_pct", { precision: 6, scale: 4 }),
+  drawImpliedPct: numeric("draw_implied_pct", { precision: 6, scale: 4 }),
+  observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+  reactionMs: integer("reaction_ms"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+export const agentPositionsRelations = relations(agentPositions, ({ many }) => ({
+  venueObservations: many(agentVenueObservations),
+}));
+
+export const agentVenueObservationsRelations = relations(
+  agentVenueObservations,
+  ({ one }) => ({
+    position: one(agentPositions, {
+      fields: [agentVenueObservations.positionId],
+      references: [agentPositions.id],
+    }),
+  }),
 );

@@ -5,11 +5,22 @@ import { SESSION_COOKIE_NAME, getSessionByToken } from "@/lib/auth/session";
 import { getCredential } from "@/lib/txline/credentials";
 import type { Network } from "@/lib/network/config";
 import type { ClosedMarketRecord, Edge, SharpLine } from "@/lib/types";
+import { getFocusFixture, type FocusFixture } from "@/lib/focus/fixture";
 import { getMarketDetail, getMockClosedMarkets, getMockEdges, type MarketDetail } from "@/lib/sources/mock";
-import { getLiveSharpLines, LiveTxlineUnavailableError } from "@/lib/sources/txline";
+import {
+  getLiveSharpLines,
+  getSharpLinesForFixture,
+  LiveTxlineUnavailableError,
+} from "@/lib/sources/txline";
 import { SHOWCASE_RECORDING_ID, getRecordingPacketCount, getReplaySharpLines } from "@/lib/engine/replay";
+import { getScheduleClosedMarkets } from "@/lib/engine/schedule-audits";
 import { getMappedClosedMarkets, getMappedEdges, getMappedMarketCount } from "@/lib/engine/mapping";
 import { filterEdges, rankEdges } from "@/lib/engine/edge";
+import {
+  getHistoricalSemiAudits,
+  getHistoricalSemiEdges,
+  isShowcaseSemiFixture,
+} from "@/lib/sources/historical-semis";
 
 /**
  * Single source-of-truth facade for "where does this screen's data come
@@ -42,6 +53,8 @@ export interface SourceStatus {
   edgesLive: number;
   /** Distinct fixture+market books configured in data/market-map.json, regardless of connectivity. */
   mappedMarkets: number;
+  /** When set, Feed is pinned to a previous TxLINE fixture from the Replay tab. */
+  focusFixture?: FocusFixture | null;
 }
 
 const RECORDING_CHECK_TTL_MS = 15_000;
@@ -63,6 +76,12 @@ interface LiveIdentity {
 
 const LIVE_IDENTITY_TTL_MS = 15_000;
 let liveIdentityCache: { at: number; identity: LiveIdentity | null } | null = null;
+
+/** Call after TxLINE activate/reset so the next /api/edges request re-reads credentials. */
+export function clearLiveIdentityCache(): void {
+  liveIdentityCache = null;
+  recordingCountCache = null;
+}
 
 /** Poll session/credential state on a short TTL so live mode can hot-swap in mid-session without a reload. */
 async function resolveLiveIdentity(): Promise<LiveIdentity | null> {
@@ -91,52 +110,198 @@ async function resolveLiveIdentityUncached(): Promise<LiveIdentity | null> {
   }
 }
 
-async function tryLiveSharpLines(): Promise<{ lines: SharpLine[]; identity: LiveIdentity } | null> {
+async function tryLiveSharpLines(): Promise<{
+  lines: SharpLine[];
+  identity: LiveIdentity;
+  errorDetail?: string;
+} | null> {
   const identity = await resolveLiveIdentity();
   if (!identity) return null;
   try {
     const lines = await getLiveSharpLines(identity.userId, identity.network);
     return { lines, identity };
   } catch (error) {
+    const message =
+      error instanceof LiveTxlineUnavailableError
+        ? error.message
+        : error instanceof Error
+          ? error.message
+          : "live TxLINE fetch failed";
     if (!(error instanceof LiveTxlineUnavailableError)) {
       console.warn("[sources/manager] live TxLINE fetch failed", error);
+    } else {
+      console.warn("[sources/manager] live TxLINE unavailable:", message);
     }
-    return null;
+    // Still return identity so the feed does not silently fall back to mock
+    // while an activated session is present.
+    return { lines: [], identity, errorDetail: message };
   }
 }
 
-export async function getSourceEdges(): Promise<{ edges: Edge[]; status: SourceStatus }> {
-  const live = await tryLiveSharpLines();
-  const mappedMarkets = getMappedMarketCount();
+async function edgesFromLines(
+  lines: SharpLine[],
+  curatedMappedMarkets: number,
+  extras: Partial<SourceStatus> & { mode: SourceMode; detail: string },
+): Promise<{ edges: Edge[]; status: SourceStatus }> {
+  try {
+    const mapped = await getMappedEdges(lines);
+    const filtered = filterEdges(mapped.edges);
+    const liveEdges = rankEdges(filtered.length > 0 ? filtered : mapped.edges);
+    const usedEvFilter = filtered.length > 0;
+    return {
+      edges: liveEdges,
+      status: {
+        mode: extras.mode,
+        lastPacketAt: Date.now(),
+        packetsTotal: lines.length,
+        detail:
+          extras.detail ||
+          (mapped.mappedMarketCount > 0
+            ? liveEdges.length > 0
+              ? `${liveEdges.length} genuine edge${liveEdges.length === 1 ? "" : "s"} across ${mapped.mappedMarketCount} mapped market${mapped.mappedMarketCount === 1 ? "" : "s"}${usedEvFilter ? "" : " (below usual EV cut)"}`
+              : `${mapped.mappedMarketCount} mapped market${mapped.mappedMarketCount === 1 ? "" : "s"} checked — none cleared the EV filter`
+            : `${lines.length} sharp line${lines.length === 1 ? "" : "s"} — no Polymarket/Kalshi book matched yet`),
+        liveTxlineConnected: true,
+        liveTxlineLineCount: lines.length,
+        edgesLive: liveEdges.length,
+        mappedMarkets: Math.max(curatedMappedMarkets, mapped.mappedMarketCount),
+        focusFixture: extras.focusFixture ?? null,
+      },
+    };
+  } catch (error) {
+    console.warn("[sources/manager] edge mapping failed", error);
+    return {
+      edges: [],
+      status: {
+        mode: extras.mode,
+        lastPacketAt: Date.now(),
+        packetsTotal: lines.length,
+        detail: extras.detail || `TxLINE lines loaded — venue join failed`,
+        liveTxlineConnected: true,
+        liveTxlineLineCount: lines.length,
+        edgesLive: 0,
+        mappedMarkets: curatedMappedMarkets,
+        focusFixture: extras.focusFixture ?? null,
+      },
+    };
+  }
+}
 
-  if (live) {
+export async function getSourceEdges(opts?: {
+  atMs?: number;
+}): Promise<{ edges: Edge[]; status: SourceStatus }> {
+  const identity = await resolveLiveIdentity();
+  const curatedMappedMarkets = getMappedMarketCount();
+  const focus = await getFocusFixture();
+  const atMs = opts?.atMs ?? focus?.atMs;
+
+  // Pinned previous fixture / historical Polymarket+Kalshi semis from Replay.
+  if (identity && focus) {
+    if (focus.showcaseSemis || (focus.id > 0 && isShowcaseSemiFixture(focus.id))) {
+      const historical = await getHistoricalSemiEdges(focus.showcaseSemis ? undefined : focus.id, {
+        atMs,
+      });
+      const edges = historical.edges;
+      const fromVenues = historical.source === "historical-venues";
+      const clock = historical.clockLabel ? ` · ${historical.clockLabel}` : "";
+      return {
+        edges,
+        status: {
+          mode: "replay",
+          lastPacketAt: historical.atMs ?? Date.now(),
+          packetsTotal: edges.length,
+          detail: fromVenues
+            ? focus.showcaseSemis
+              ? `Simulating 1m PM+Kalshi candles — both semis${clock}`
+              : `Simulating 1m PM+Kalshi — ${focus.label}${clock}`
+            : `Fallback tape — ${focus.label}`,
+          liveTxlineConnected: true,
+          liveTxlineLineCount: edges.length,
+          edgesLive: edges.length,
+          mappedMarkets: Math.max(curatedMappedMarkets, focus.showcaseSemis ? 2 : 1),
+          focusFixture: {
+            ...focus,
+            atMs: historical.atMs ?? atMs ?? focus.atMs,
+          },
+        },
+      };
+    }
+
     try {
-      const mapped = await getMappedEdges(live.lines);
-      // A book actually resolving (real venue prices joined to real TxLINE
-      // lines) is what makes this "live" — even if zero edges clear the EV
-      // threshold, that's still a genuine, live comparison, not a fallback.
-      if (mapped.mappedMarketCount > 0) {
-        const liveEdges = rankEdges(filterEdges(mapped.edges));
+      const lines = await getSharpLinesForFixture(identity.userId, identity.network, {
+        id: focus.id,
+        home: focus.home,
+        away: focus.away,
+        competition: focus.competition,
+      });
+      if (lines.length === 0) {
         return {
-          edges: liveEdges,
+          edges: [],
           status: {
-            mode: "live",
+            mode: "replay",
             lastPacketAt: Date.now(),
-            packetsTotal: live.lines.length,
-            detail:
-              liveEdges.length > 0
-                ? `${liveEdges.length} genuine live edge${liveEdges.length === 1 ? "" : "s"} across ${mapped.mappedMarketCount} mapped market${mapped.mappedMarketCount === 1 ? "" : "s"}`
-                : `${mapped.mappedMarketCount} mapped market${mapped.mappedMarketCount === 1 ? "" : "s"} checked live — none mispriced right now`,
+            packetsTotal: 0,
+            detail: `Focused ${focus.label} — TxLINE has history packets but no odds snapshot left. Use “Historical venue tape” on Replay for France/Spain + England/Argentina.`,
             liveTxlineConnected: true,
-            liveTxlineLineCount: live.lines.length,
-            edgesLive: liveEdges.length,
-            mappedMarkets,
+            liveTxlineLineCount: 0,
+            edgesLive: 0,
+            mappedMarkets: curatedMappedMarkets,
+            focusFixture: focus,
           },
         };
       }
+      return edgesFromLines(lines, curatedMappedMarkets, {
+        mode: "replay",
+        detail: `Focused ${focus.label} (previous TxLINE fixture)`,
+        focusFixture: focus,
+      });
     } catch (error) {
-      console.warn("[sources/manager] live edge mapping failed", error);
+      console.warn("[sources/manager] focused fixture failed", error);
+      return {
+        edges: [],
+        status: {
+          mode: "replay",
+          lastPacketAt: Date.now(),
+          packetsTotal: 0,
+          detail: `Focused ${focus.label} — could not load TxLINE odds for this fixture`,
+          liveTxlineConnected: true,
+          liveTxlineLineCount: 0,
+          edgesLive: 0,
+          mappedMarkets: curatedMappedMarkets,
+          focusFixture: focus,
+        },
+      };
     }
+  }
+
+  const live = await tryLiveSharpLines();
+
+  // Activated TxLINE session: never fall back to mock/replay cards.
+  // Venue join is best-effort; empty edges still mean "live", not showcase.
+  if (live) {
+    if (live.lines.length === 0) {
+      return {
+        edges: [],
+        status: {
+          mode: "live",
+          lastPacketAt: Date.now(),
+          packetsTotal: 0,
+          detail: live.errorDetail
+            ? `TxLINE connected — ${live.errorDetail}`
+            : "TxLINE connected — waiting for priced markets",
+          liveTxlineConnected: true,
+          liveTxlineLineCount: 0,
+          edgesLive: 0,
+          mappedMarkets: curatedMappedMarkets,
+          focusFixture: null,
+        },
+      };
+    }
+    return edgesFromLines(live.lines, curatedMappedMarkets, {
+      mode: "live",
+      detail: "",
+      focusFixture: null,
+    });
   }
 
   const recordingCount = await cachedRecordingPacketCount();
@@ -151,10 +316,11 @@ export async function getSourceEdges(): Promise<{ edges: Edge[]; status: SourceS
           lastPacketAt: Date.now(),
           packetsTotal: recordingCount,
           detail: `Replaying ${recordingCount} recorded TxLINE packets`,
-          liveTxlineConnected: live !== null,
-          liveTxlineLineCount: live?.lines.length ?? 0,
+          liveTxlineConnected: false,
+          liveTxlineLineCount: 0,
           edgesLive: 0,
-          mappedMarkets,
+          mappedMarkets: curatedMappedMarkets,
+          focusFixture: null,
         },
       };
     }
@@ -167,15 +333,27 @@ export async function getSourceEdges(): Promise<{ edges: Edge[]; status: SourceS
       mode: "mock",
       lastPacketAt: Date.now(),
       packetsTotal: edges.length,
-      detail: live
-        ? `Seeded demo data — TxLINE is connected but no live venue price is mapped to it yet`
-        : "Seeded demo data",
-      liveTxlineConnected: live !== null,
-      liveTxlineLineCount: live?.lines.length ?? 0,
+      detail: "Seeded demo data — connect a wallet for live TxLINE",
+      liveTxlineConnected: false,
+      liveTxlineLineCount: 0,
       edgesLive: 0,
-      mappedMarkets,
+      mappedMarkets: curatedMappedMarkets,
+      focusFixture: null,
     },
   };
+}
+
+/** Raw sharp lines: live TxLINE when activated, else whatever the edges cascade used. */
+export async function getSourceSharpLines(): Promise<{
+  lines: SharpLine[];
+  status: SourceStatus;
+}> {
+  const result = await getSourceEdges();
+  if (result.status.liveTxlineConnected) {
+    const live = await tryLiveSharpLines();
+    return { lines: live?.lines ?? [], status: result.status };
+  }
+  return { lines: result.edges.map((edge) => edge.sharp), status: result.status };
 }
 
 export async function getSourceClosedMarkets(): Promise<{
@@ -184,27 +362,96 @@ export async function getSourceClosedMarkets(): Promise<{
 }> {
   const live = await resolveLiveIdentity();
   const mappedMarkets = getMappedMarketCount();
+  const focus = await getFocusFixture();
 
   if (live) {
+    if (focus?.showcaseSemis || (focus && isShowcaseSemiFixture(focus.id))) {
+      const records = await getHistoricalSemiAudits(focus.showcaseSemis ? undefined : focus.id);
+      return {
+        records,
+        status: {
+          mode: "replay",
+          lastPacketAt: Date.now(),
+          packetsTotal: records.length,
+          detail: focus.showcaseSemis
+            ? "Settlement audits on real Polymarket/Kalshi market ids for the two semis"
+            : `Settlement audits on real venue ids — ${focus.label}`,
+          liveTxlineConnected: true,
+          liveTxlineLineCount: 0,
+          edgesLive: 0,
+          mappedMarkets,
+          focusFixture: focus,
+        },
+      };
+    }
+
     try {
-      const liveRecords = await getMappedClosedMarkets(live.userId, live.network);
-      if (liveRecords.length > 0) {
+      const [mappedRecords, scheduleRecords] = await Promise.all([
+        getMappedClosedMarkets(live.userId, live.network),
+        getScheduleClosedMarkets(live.userId, live.network),
+      ]);
+      const byId = new Map<string, ClosedMarketRecord>();
+      for (const record of [...scheduleRecords, ...mappedRecords]) {
+        byId.set(`${record.venue}:${record.venueMarketId}`, record);
+      }
+      let records = [...byId.values()];
+      if (focus) {
+        const focused = records.filter((record) => record.fixtureId === `txl-${focus.id}`);
+        if (focused.length > 0) records = focused;
+      }
+      // If live joins are empty, still surface the semi showcase so Watchdog
+      // isn't a blank page during the hackathon demo.
+      if (records.length === 0) {
+        records = await getHistoricalSemiAudits();
         return {
-          records: liveRecords,
+          records,
           status: {
-            mode: "live",
+            mode: "replay",
             lastPacketAt: Date.now(),
-            packetsTotal: liveRecords.length,
-            detail: `${liveRecords.length} real settlement audit${liveRecords.length === 1 ? "" : "s"} from mapped markets`,
+            packetsTotal: records.length,
+            detail:
+              "Semi settlement tape on real Polymarket/Kalshi ids (live joins had nothing closed yet)",
             liveTxlineConnected: true,
             liveTxlineLineCount: 0,
             edgesLive: 0,
             mappedMarkets,
+            focusFixture: focus,
           },
         };
       }
+      return {
+        records,
+        status: {
+          mode: "live",
+          lastPacketAt: Date.now(),
+          packetsTotal: records.length,
+          detail: focus
+            ? `${records.length} real audit${records.length === 1 ? "" : "s"} for ${focus.label}`
+            : `${records.length} real settlement audit${records.length === 1 ? "" : "s"} from TxLINE + venues`,
+          liveTxlineConnected: true,
+          liveTxlineLineCount: 0,
+          edgesLive: 0,
+          mappedMarkets,
+          focusFixture: focus,
+        },
+      };
     } catch (error) {
       console.warn("[sources/manager] live closed-market audit failed", error);
+      const records = await getHistoricalSemiAudits();
+      return {
+        records,
+        status: {
+          mode: "replay",
+          lastPacketAt: Date.now(),
+          packetsTotal: records.length,
+          detail: "Semi settlement tape — live audit join failed",
+          liveTxlineConnected: true,
+          liveTxlineLineCount: 0,
+          edgesLive: 0,
+          mappedMarkets,
+          focusFixture: focus,
+        },
+      };
     }
   }
 
@@ -218,10 +465,11 @@ export async function getSourceClosedMarkets(): Promise<{
       lastPacketAt: Date.now(),
       packetsTotal: mode === "replay" ? recordingCount : records.length,
       detail: mode === "replay" ? `Replaying ${recordingCount} recorded packets` : "Seeded demo data",
-      liveTxlineConnected: live !== null,
+      liveTxlineConnected: false,
       liveTxlineLineCount: 0,
       edgesLive: 0,
       mappedMarkets,
+      focusFixture: null,
     },
   };
 }
@@ -233,12 +481,44 @@ export async function getSourceStatus(): Promise<SourceStatus> {
 }
 
 /**
- * Market detail is keyed to one specific outcome in the curated story, so
- * there is no independent "live" branch yet — it inherits whatever mode the
- * edges feed resolved to. Still routed through the manager (not imported
- * directly by components) so every screen has one seam to swap when a real
- * per-outcome live/replay source exists.
+ * Market detail for mock outcomes, or a live/sim snapshot built from the
+ * current edge cascade (historical 1m candles when a semi is focused).
  */
-export function getSourceMarketDetail(outcomeId: string): MarketDetail | null {
-  return getMarketDetail(outcomeId);
+export async function getSourceMarketDetail(
+  outcomeId: string,
+  opts?: { atMs?: number },
+): Promise<MarketDetail | null> {
+  const mock = getMarketDetail(outcomeId);
+  if (mock) return mock;
+
+  const { edges, status } = await getSourceEdges(
+    typeof opts?.atMs === "number" ? { atMs: opts.atMs } : undefined,
+  );
+  const matched = edges.filter((edge) => edge.outcomeId === outcomeId);
+  if (matched.length === 0) {
+    // Fall back: load the fixture book even if focus cookie drifted.
+    const fixtureMatch = /^txl-(\d+):/.exec(outcomeId);
+    if (!fixtureMatch) return null;
+    const fixtureId = Number(fixtureMatch[1]);
+    if (!isShowcaseSemiFixture(fixtureId)) return null;
+    const historical = await getHistoricalSemiEdges(fixtureId, { atMs: opts?.atMs ?? status.focusFixture?.atMs });
+    const histMatched = historical.edges.filter((edge) => edge.outcomeId === outcomeId);
+    if (histMatched.length === 0) return null;
+    return detailFromEdges(histMatched);
+  }
+  return detailFromEdges(matched);
+}
+
+function detailFromEdges(matched: Edge[]): MarketDetail {
+  const sharp = matched[0].sharp;
+  const venuePrices = matched.map((edge) => edge.venue);
+  const bookSelections = [...new Map(matched.map((edge) => [edge.sharp.selectionLabel, edge.sharp])).values()];
+  const gapHistory = matched[0]?.gapHistory ?? [];
+  return {
+    sharp,
+    venuePrices,
+    edges: matched,
+    gapHistory,
+    bookSelections,
+  };
 }

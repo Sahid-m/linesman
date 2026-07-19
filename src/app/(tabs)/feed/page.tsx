@@ -12,6 +12,8 @@ import { FilterChips, type FeedFilter } from "@/components/linesman/filter-chips
 import { PullToRefresh } from "@/components/linesman/pull-to-refresh";
 import { DisagreementDial } from "@/components/linesman/disagreement-dial";
 import { computeDisagreementIndex } from "@/lib/engine/disagreement";
+import { useReplayStore } from "@/lib/store/replay-store";
+import { useVenueSimStore } from "@/lib/store/venue-sim-store";
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
@@ -29,10 +31,22 @@ function matchesFilter(edge: Edge, filter: FeedFilter): boolean {
 }
 
 export default function FeedPage() {
+  const atMs = useVenueSimStore((state) => state.atMs);
+  const simLabel = useVenueSimStore((state) => state.label);
+  const playing = useVenueSimStore((state) => state.playing);
+  const hydrated = useVenueSimStore((state) => state.hydrated);
+  const clearSim = useVenueSimStore((state) => state.clear);
+
+  const edgesKey =
+    !hydrated ? null : atMs != null ? `/api/edges?atMs=${atMs}` : "/api/edges";
   const { data, isLoading, mutate } = useSWR<{ edges: Edge[]; status: SourceStatus; generatedAt: number }>(
-    "/api/edges",
+    edgesKey,
     fetcher,
-    { refreshInterval: 15_000 },
+    {
+      // Key already changes every match-minute while playing.
+      refreshInterval: playing ? 0 : atMs != null ? 2_000 : 15_000,
+      keepPreviousData: true,
+    },
   );
   const [filter, setFilter] = useState<FeedFilter>("all");
   const seenIds = useRef<Set<string>>(new Set());
@@ -45,13 +59,13 @@ export default function FeedPage() {
     if (!data) return;
     const fresh = new Set<string>();
     for (const edge of data.edges) {
-      const key = `${edge.outcomeId}:${edge.venue.venue}`;
-      if (!seenIds.current.has(key)) fresh.add(key);
+      const key = `${edge.outcomeId}:${edge.venue.venue}:${edge.sharp.packetTimestamp}`;
+      if (!seenIds.current.has(key)) fresh.add(`${edge.outcomeId}:${edge.venue.venue}`);
       seenIds.current.add(key);
     }
     if (fresh.size === 0) return;
     const markFresh = setTimeout(() => setFreshlySeen(fresh), 0);
-    const clearFresh = setTimeout(() => setFreshlySeen(new Set()), 1_800);
+    const clearFresh = setTimeout(() => setFreshlySeen(new Set()), 900);
     return () => {
       clearTimeout(markFresh);
       clearTimeout(clearFresh);
@@ -64,6 +78,16 @@ export default function FeedPage() {
     [data, edges],
   );
 
+  const focus = data?.status.focusFixture;
+
+  async function clearFocus() {
+    clearSim();
+    await fetch("/api/focus", { method: "DELETE" });
+    useReplayStore.getState().setReplayMode(false);
+    useReplayStore.getState().setPlaying(false);
+    void mutate();
+  }
+
   return (
     <PullToRefresh onRefresh={() => mutate()}>
       <div className="flex flex-col gap-4 pt-1">
@@ -71,7 +95,7 @@ export default function FeedPage() {
           <div>
             <p className="text-xs uppercase tracking-wide text-[color:var(--color-muted)]">Edge Feed</p>
             <h1 className="font-display text-3xl leading-[0.95] text-[color:var(--color-text)] lg:text-5xl">
-              Mispriced right now
+              {simLabel ?? focus?.label ?? "Mispriced right now"}
             </h1>
           </div>
           {lastPacketAt > 0 && (
@@ -81,11 +105,35 @@ export default function FeedPage() {
           )}
         </div>
 
+        {(focus || atMs != null) && (
+          <div
+            className="flex flex-wrap items-center justify-between gap-2 rounded-xl border px-3.5 py-2.5 text-sm"
+            style={{
+              borderColor: "color-mix(in srgb, var(--color-accent) 40%, var(--color-border))",
+              background: "color-mix(in srgb, var(--color-accent) 10%, var(--color-surface))",
+              color: "var(--color-text)",
+            }}
+          >
+            <span className="min-w-0 flex-1">
+              {data?.status.detail ||
+                (playing ? "Simulation running — prices update every match-minute" : "Focused from Replay")}
+            </span>
+            <button
+              type="button"
+              onClick={() => void clearFocus()}
+              className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold"
+              style={{ color: "var(--color-bg)", background: "var(--color-accent)" }}
+            >
+              Back to live
+            </button>
+          </div>
+        )}
+
         {edges.length > 0 && <DisagreementDial score={disagreement} />}
 
         <FilterChips active={filter} onChange={setFilter} />
 
-        {isLoading ? (
+        {isLoading && edges.length === 0 ? (
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
             {[0, 1, 2, 3, 4, 5].map((key) => (
               <div
@@ -99,6 +147,8 @@ export default function FeedPage() {
             lastScanAt={data?.generatedAt ?? 0}
             isGenuinelyLive={data?.status.mode === "live"}
             mappedMarkets={data?.status.mappedMarkets ?? 0}
+            focusLabel={simLabel ?? focus?.label}
+            detail={data?.status.detail}
           />
         ) : (
           <LayoutGroup>

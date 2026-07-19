@@ -1,5 +1,5 @@
 {
-  "name": "txline-starter",
+  "name": "linesman",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -15,11 +15,14 @@
     "db:migrate": "drizzle-kit migrate",
     "verify": "tsx scripts/verify-cli.ts",
     "record": "tsx scripts/record.ts",
-    "discover-markets": "tsx scripts/discover-markets.ts"
+    "discover-markets": "tsx scripts/discover-markets.ts",
+    "agent:run": "NODE_OPTIONS=--conditions=react-server tsx scripts/with-env.ts scripts/agent-run.ts",
+    "agent:backtest": "NODE_OPTIONS=--conditions=react-server tsx scripts/with-env.ts scripts/agent-backtest-report.ts"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
     "@neondatabase/serverless": "^1.1.0",
+    "@openrouter/ai-sdk-provider": "^3.0.0",
     "@solana/spl-token": "^0.4.15",
     "@solana/wallet-adapter-base": "^0.9.27",
     "@solana/wallet-adapter-react": "^0.15.39",
@@ -27,6 +30,7 @@
     "@solana/wallet-adapter-wallets": "^0.19.38",
     "@solana/web3.js": "^1.98.4",
     "@tailwindcss/postcss": "^4.3.3",
+    "ai": "^7.0.31",
     "bn.js": "^5.2.5",
     "bs58": "^6.0.0",
     "drizzle-orm": "^0.45.2",

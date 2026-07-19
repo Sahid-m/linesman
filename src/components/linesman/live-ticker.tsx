@@ -8,10 +8,8 @@ import type { LiveWinnerMarket } from "@/lib/sources/polymarket";
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
 const FALLBACK_ITEMS = [
-  "🏆 FINAL · FRA vs ARG · Live",
-  "🥉 3RD PLACE · POR vs BRA · Live",
   "⛓ Sharp lines anchored on Solana every packet",
-  "🛡 140 markets under Watchdog audit",
+  "⏱ Replay past fixtures with real 1m Polymarket + Kalshi candles",
 ];
 
 function formatPct(probability: number): string {

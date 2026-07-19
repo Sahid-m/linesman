@@ -22,6 +22,23 @@ function numericField(
   }
 }
 
+/**
+ * Final-outcome record for a match. Relies on action + statusId; period is
+ * accepted when present and equal to 100, but omitted period still counts
+ * as final (observed on real historical feeds).
+ */
+export function isFinalScoreRecord(payload: unknown): boolean {
+  if (!payload || typeof payload !== "object") return false;
+  const record = payload as Record<string, unknown>;
+  const action = record.action ?? record.Action;
+  const statusId = Number(record.statusId ?? record.StatusId);
+  const rawPeriod = record.period ?? record.Period;
+  const period = rawPeriod === undefined ? null : Number(rawPeriod);
+  return (
+    action === "game_finalised" && statusId === 100 && (period === null || period === 100)
+  );
+}
+
 export function normalizeScoreEvent(
   payload: unknown,
   source: TxlineEvent["source"],

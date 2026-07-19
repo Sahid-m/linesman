@@ -3,9 +3,11 @@ import "server-only";
 import fs from "node:fs";
 import path from "node:path";
 
+import { autoMapSharpLines } from "@/lib/engine/auto-map";
 import { computeEdge } from "@/lib/engine/edge";
 import { devigBook } from "@/lib/engine/devig";
 import { getFixtureProvenResult } from "@/lib/sources/txline";
+import { getKalshiMarketsByTickers, type KalshiRawMarket } from "@/lib/sources/kalshi";
 import { getPolymarketMarketsByIds, type PolymarketRawMarket } from "@/lib/sources/polymarket";
 import type { Network } from "@/lib/network/config";
 import type { ClosedMarketRecord, Edge, SharpLine, Venue, VenuePrice } from "@/lib/types";
@@ -34,7 +36,7 @@ export interface MarketMapping {
     selection: string; // "part1" | "part2" | "draw" for 1x2 — matches the outcomeId's selection segment
   };
   venues: VenueMarketMapping[];
-  mappingConfidence: "exact";
+  mappingConfidence: "exact" | "heuristic";
   note?: string;
 }
 
@@ -66,7 +68,8 @@ function isMarketMapping(value: unknown): value is MarketMapping {
     typeof txline.selection === "string" &&
     Array.isArray(v.venues) &&
     v.venues.length > 0 &&
-    v.venues.every(isVenueMapping)
+    v.venues.every(isVenueMapping) &&
+    (v.mappingConfidence === "exact" || v.mappingConfidence === "heuristic" || v.mappingConfidence === undefined)
   );
 }
 
@@ -97,7 +100,50 @@ function bookKey(mapping: MarketMapping): string {
 }
 
 function primaryVenue(mapping: MarketMapping): VenueMarketMapping | undefined {
-  return mapping.venues.find((venue) => venue.venue === "polymarket");
+  return (
+    mapping.venues.find((venue) => venue.venue === "polymarket") ??
+    mapping.venues.find((venue) => venue.venue === "kalshi")
+  );
+}
+
+type ResolvedVenueMarket = {
+  venue: Venue;
+  id: string;
+  question: string;
+  yesPrice: number;
+  liquidityUsd: number;
+  closed: boolean;
+  closedAt: number | null;
+  url: string;
+};
+
+function asResolved(
+  venue: Venue,
+  market: PolymarketRawMarket | KalshiRawMarket | undefined,
+): ResolvedVenueMarket | null {
+  if (!market) return null;
+  return {
+    venue,
+    id: market.id,
+    question: market.question,
+    yesPrice: market.yesPrice,
+    liquidityUsd: market.liquidityUsd,
+    closed: market.closed,
+    closedAt: market.closedAt,
+    url: market.url,
+  };
+}
+
+/** Curated file entries win on outcomeId; auto-discovered mappings fill gaps. */
+export async function resolveEffectiveMappings(sharpLines: SharpLine[]): Promise<MarketMapping[]> {
+  const curated = loadMarketMap();
+  const curatedIds = new Set(curated.map((m) => m.outcomeId));
+  const auto = await autoMapSharpLines(sharpLines);
+  const merged = [...curated];
+  for (const mapping of auto) {
+    if (!curatedIds.has(mapping.outcomeId)) merged.push(mapping);
+  }
+  return merged;
 }
 
 export interface MappedEdgesResult {
@@ -107,19 +153,44 @@ export interface MappedEdgesResult {
 }
 
 /**
- * Joins live SharpLine packets against the curated market map + fresh venue
- * prices, de-vigging each 1x2 book (up to 3 correlated Yes/No sub-markets)
- * together so the fair probability per selection accounts for the whole
- * book's overround — not just its own raw Yes price. Returns real `Edge[]`
- * ready for the same filter/rank pipeline the mock feed uses.
+ * Joins live SharpLine packets against curated + auto-discovered venue maps
+ * and fresh Polymarket/Kalshi prices, de-vigging each 1x2 book together.
  */
 export async function getMappedEdges(sharpLines: SharpLine[]): Promise<MappedEdgesResult> {
-  const mappings = loadMarketMap();
+  const mappings = await resolveEffectiveMappings(sharpLines);
   if (mappings.length === 0) return { edges: [], mappedMarketCount: 0 };
 
-  const venueIds = mappings.map(primaryVenue).filter((v): v is VenueMarketMapping => !!v).map((v) => v.venueMarketId);
-  const polymarketById = await getPolymarketMarketsByIds(venueIds);
+  const primaryVenues = mappings
+    .map(primaryVenue)
+    .filter((v): v is VenueMarketMapping => !!v);
+  const polymarketIds = primaryVenues.filter((v) => v.venue === "polymarket").map((v) => v.venueMarketId);
+  const kalshiIds = primaryVenues.filter((v) => v.venue === "kalshi").map((v) => v.venueMarketId);
+
+  const [polymarketById, kalshiById] = await Promise.all([
+    getPolymarketMarketsByIds(polymarketIds),
+    getKalshiMarketsByTickers(kalshiIds),
+  ]);
+
   const sharpByOutcomeId = new Map(sharpLines.map((line) => [line.outcomeId, line]));
+
+  // De-vig TxLINE 1x2 books so fairProb is comparable to venue Yes prices.
+  const sharpBooks = new Map<string, SharpLine[]>();
+  for (const line of sharpLines) {
+    const key = `${line.fixtureId}:${line.market}`;
+    const list = sharpBooks.get(key) ?? [];
+    list.push(line);
+    sharpBooks.set(key, list);
+  }
+  for (const book of sharpBooks.values()) {
+    if (book.length < 2) continue;
+    const fair = devigBook(
+      book.map((line) => line.impliedProb),
+      "power",
+    );
+    book.forEach((line, index) => {
+      sharpByOutcomeId.set(line.outcomeId, { ...line, fairProb: fair[index] });
+    });
+  }
 
   const books = new Map<string, MarketMapping[]>();
   for (const mapping of mappings) {
@@ -132,11 +203,15 @@ export async function getMappedEdges(sharpLines: SharpLine[]): Promise<MappedEdg
   let mappedMarketCount = 0;
 
   for (const bookMappings of books.values()) {
-    const resolved: Array<{ mapping: MarketMapping; market: PolymarketRawMarket; rawProb: number }> = [];
+    const resolved: Array<{ mapping: MarketMapping; market: ResolvedVenueMarket; rawProb: number }> = [];
     for (const mapping of bookMappings) {
       const venueMapping = primaryVenue(mapping);
-      const market = venueMapping ? polymarketById.get(venueMapping.venueMarketId) : undefined;
-      if (!venueMapping || !market || market.closed) continue;
+      if (!venueMapping) continue;
+      const market =
+        venueMapping.venue === "polymarket"
+          ? asResolved("polymarket", polymarketById.get(venueMapping.venueMarketId))
+          : asResolved("kalshi", kalshiById.get(venueMapping.venueMarketId));
+      if (!market || market.closed) continue;
       const rawProb = venueMapping.yesMeansSelection ? market.yesPrice : 1 - market.yesPrice;
       resolved.push({ mapping, market, rawProb });
     }
@@ -156,7 +231,7 @@ export async function getMappedEdges(sharpLines: SharpLine[]): Promise<MappedEdg
       const fairVenueProb = fairProbs ? fairProbs[index] : rawProb;
       const venuePrice: VenuePrice = {
         outcomeId: mapping.outcomeId,
-        venue: "polymarket",
+        venue: market.venue,
         venueMarketId: market.id,
         question: market.question,
         yesPrice: fairVenueProb,
@@ -164,7 +239,8 @@ export async function getMappedEdges(sharpLines: SharpLine[]): Promise<MappedEdg
         fetchedAt: Date.now(),
         venueUrl: market.url,
       };
-      edges.push(computeEdge({ sharp, venue: venuePrice, mappingConfidence: "high" }));
+      const confidence = mapping.mappingConfidence === "exact" ? "high" : "medium";
+      edges.push(computeEdge({ sharp, venue: venuePrice, mappingConfidence: confidence }));
       bookHadEdge = true;
     });
     if (bookHadEdge) mappedMarketCount += 1;

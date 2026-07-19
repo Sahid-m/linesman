@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth/session";
 import { txlineFetch } from "@/lib/txline/client";
 import { parseFixtureRouteInput } from "@/lib/txline/route-input";
+import { parseSseDataLines } from "@/lib/txline/sse";
 import { normalizeScoreEvent } from "@/lib/txline/types";
 
 export async function GET(
@@ -40,7 +41,12 @@ export async function GET(
     try {
       raw = JSON.parse(text) as unknown;
     } catch {
-      throw new Error("History response was not valid JSON");
+      // Historical endpoint returns SSE-framed lines ("data: {...}" per record).
+      const sseRecords = parseSseDataLines(text);
+      if (sseRecords.length === 0) {
+        throw new Error("History response was not valid JSON");
+      }
+      raw = sseRecords;
     }
     const records = Array.isArray(raw)
       ? raw

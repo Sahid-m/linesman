@@ -26,18 +26,20 @@ export function EdgeCard({ edge, isNew = false }: { edge: Edge; isNew?: boolean 
   const { sharp, venue } = edge;
   const positive = edge.direction === "underpriced";
   const detailId = encodeURIComponent(edge.outcomeId);
+  const atMs = edge.sharp.packetTimestamp;
+  const href = `/market/${detailId}?atMs=${atMs}`;
 
   return (
     <motion.div
       layout
-      layoutId={edge.outcomeId}
+      layoutId={`${edge.outcomeId}:${venue.venue}`}
       initial={isNew ? { opacity: 0, y: -24 } : false}
       animate={{ opacity: 1, y: 0 }}
       transition={{ type: "spring", stiffness: 260, damping: 26 }}
       className={`ln-edge-card relative overflow-hidden rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] ${isNew ? "ln-pulse" : ""}`}
       style={{ borderLeft: `3px solid ${accentTeamColor(edge)}` }}
     >
-      <Link href={`/market/${detailId}`} className="block p-4 active:scale-[0.98]" style={{ transition: "transform 120ms ease" }}>
+      <Link href={href} className="block p-4 active:scale-[0.98]" style={{ transition: "transform 120ms ease" }}>
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <TeamCrest team={sharp.homeTeam} size="sm" />

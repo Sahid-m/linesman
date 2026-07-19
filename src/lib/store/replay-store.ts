@@ -48,12 +48,16 @@ export const useReplayStore = create<ReplayState>((set, get) => ({
   isPlaying: false,
   selectedRecordingId: MOCK_RECORDINGS[0].id,
   speed: 1,
-  progress: 0.32,
-  setReplayMode: (value) => set({ isReplayMode: value }),
-  setPlaying: (value) => set({ isPlaying: value, isReplayMode: value ? true : get().isReplayMode }),
-  togglePlaying: () => set((state) => ({ isPlaying: !state.isPlaying, isReplayMode: true })),
+  progress: 0,
+  setReplayMode: (value) => set({ isReplayMode: value, isPlaying: value ? get().isPlaying : false }),
+  setPlaying: (value) => set({ isPlaying: value }),
+  togglePlaying: () =>
+    set((state) => {
+      const nextPlaying = !state.isPlaying;
+      return { isPlaying: nextPlaying, isReplayMode: nextPlaying ? true : state.isReplayMode };
+    }),
   setSpeed: (speed) => set({ speed }),
-  setRecording: (id) => set({ selectedRecordingId: id, progress: 0 }),
+  setRecording: (id) => set({ selectedRecordingId: id, progress: 0, isPlaying: false }),
   setProgress: (progress) => set({ progress: Math.min(1, Math.max(0, progress)) }),
   advance: (deltaSeconds) =>
     set((state) => {

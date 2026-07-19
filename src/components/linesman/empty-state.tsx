@@ -3,9 +3,18 @@ interface EmptyStateProps {
   /** When the source is genuinely live (real TxLINE + mapped venue prices), the copy should own that instead of reading like the generic seeded-data placeholder. */
   isGenuinelyLive?: boolean;
   mappedMarkets?: number;
+  /** Previous-fixture focus from Replay — explain empty odds honestly. */
+  focusLabel?: string | null;
+  detail?: string | null;
 }
 
-export function EmptyState({ lastScanAt, isGenuinelyLive = false, mappedMarkets = 0 }: EmptyStateProps) {
+export function EmptyState({
+  lastScanAt,
+  isGenuinelyLive = false,
+  mappedMarkets = 0,
+  focusLabel = null,
+  detail = null,
+}: EmptyStateProps) {
   return (
     <div className="flex flex-col items-center gap-4 rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-6 py-14 text-center">
       <svg width="72" height="52" viewBox="0 0 72 52" fill="none" aria-hidden="true">
@@ -15,7 +24,17 @@ export function EmptyState({ lastScanAt, isGenuinelyLive = false, mappedMarkets 
         <path d="M1 26H30" stroke="var(--color-accent)" strokeWidth="2" strokeDasharray="4 4" />
         <path d="M42 26H71" stroke="var(--color-accent)" strokeWidth="2" strokeDasharray="4 4" />
       </svg>
-      {isGenuinelyLive ? (
+      {focusLabel ? (
+        <>
+          <p className="font-display text-xl uppercase tracking-wide text-[color:var(--color-text)]">
+            {focusLabel}
+          </p>
+          <p className="max-w-sm text-sm text-[color:var(--color-muted)]">
+            {detail ||
+              "Pinned from Replay. Finished fixtures often have TxLINE score history but no odds snapshot left — scrub packets on the Replay tab, or clear focus to return to live priced markets."}
+          </p>
+        </>
+      ) : isGenuinelyLive ? (
         <>
           <p className="font-display text-xl uppercase tracking-wide text-[color:var(--color-text)]">
             The market is honest right now
