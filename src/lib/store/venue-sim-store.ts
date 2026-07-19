@@ -42,6 +42,19 @@ export type VenueSimState = {
   tick: () => boolean;
 };
 
+/**
+ * True once the replay clock has reached its final minute — the match is
+ * over and venue books have settled to the result, so their prices are no
+ * longer live edges.
+ */
+export function selectIsFullTime(state: VenueSimState): boolean {
+  return (
+    state.fixtureId != null &&
+    state.minutes.length > 1 &&
+    state.minuteIndex >= state.minutes.length - 1
+  );
+}
+
 export const useVenueSimStore = create<VenueSimState>()(
   persist(
     (set, get) => ({

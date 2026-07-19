@@ -7,13 +7,14 @@ import type { Edge } from "@/lib/types";
 import type { SourceStatus } from "@/lib/sources/manager";
 import { EdgeCard } from "@/components/linesman/edge-card";
 import { EmptyState } from "@/components/linesman/empty-state";
+import { FullTimeCard } from "@/components/linesman/full-time-card";
 import { FreshnessChip } from "@/components/linesman/freshness-chip";
 import { FilterChips, type FeedFilter } from "@/components/linesman/filter-chips";
 import { PullToRefresh } from "@/components/linesman/pull-to-refresh";
 import { DisagreementDial } from "@/components/linesman/disagreement-dial";
 import { computeDisagreementIndex } from "@/lib/engine/disagreement";
 import { useReplayStore } from "@/lib/store/replay-store";
-import { useVenueSimStore } from "@/lib/store/venue-sim-store";
+import { selectIsFullTime, useVenueSimStore } from "@/lib/store/venue-sim-store";
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
@@ -36,6 +37,7 @@ export default function FeedPage() {
   const playing = useVenueSimStore((state) => state.playing);
   const hydrated = useVenueSimStore((state) => state.hydrated);
   const clearSim = useVenueSimStore((state) => state.clear);
+  const isFullTime = useVenueSimStore(selectIsFullTime);
 
   const edgesKey =
     !hydrated ? null : atMs != null ? `/api/edges?atMs=${atMs}` : "/api/edges";
@@ -115,8 +117,10 @@ export default function FeedPage() {
             }}
           >
             <span className="min-w-0 flex-1">
-              {data?.status.detail ||
-                (playing ? "Live replay — prices move each match-minute" : "Pinned from Replay")}
+              {isFullTime
+                ? "Full time — venue books have settled to the result"
+                : data?.status.detail ||
+                  (playing ? "Live replay — prices move each match-minute" : "Pinned from Replay")}
             </span>
             <button
               type="button"
@@ -129,39 +133,45 @@ export default function FeedPage() {
           </div>
         )}
 
-        {edges.length > 0 && <DisagreementDial score={disagreement} />}
-
-        <FilterChips active={filter} onChange={setFilter} />
-
-        {isLoading && edges.length === 0 ? (
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
-            {[0, 1, 2, 3, 4, 5].map((key) => (
-              <div
-                key={key}
-                className="h-[210px] animate-pulse rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)]"
-              />
-            ))}
-          </div>
-        ) : filtered.length === 0 ? (
-          <EmptyState
-            lastScanAt={data?.generatedAt ?? 0}
-            isGenuinelyLive={data?.status.mode === "live"}
-            mappedMarkets={data?.status.mappedMarkets ?? 0}
-            focusLabel={simLabel ?? focus?.label}
-            detail={data?.status.detail}
-          />
+        {isFullTime ? (
+          <FullTimeCard variant="feed" />
         ) : (
-          <LayoutGroup>
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
-              {filtered.map((edge) => (
-                <EdgeCard
-                  key={`${edge.outcomeId}:${edge.venue.venue}`}
-                  edge={edge}
-                  isNew={freshlySeen.has(`${edge.outcomeId}:${edge.venue.venue}`)}
-                />
-              ))}
-            </div>
-          </LayoutGroup>
+          <>
+            {edges.length > 0 && <DisagreementDial score={disagreement} />}
+
+            <FilterChips active={filter} onChange={setFilter} />
+
+            {isLoading && edges.length === 0 ? (
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
+                {[0, 1, 2, 3, 4, 5].map((key) => (
+                  <div
+                    key={key}
+                    className="h-[210px] animate-pulse rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)]"
+                  />
+                ))}
+              </div>
+            ) : filtered.length === 0 ? (
+              <EmptyState
+                lastScanAt={data?.generatedAt ?? 0}
+                isGenuinelyLive={data?.status.mode === "live"}
+                mappedMarkets={data?.status.mappedMarkets ?? 0}
+                focusLabel={simLabel ?? focus?.label}
+                detail={data?.status.detail}
+              />
+            ) : (
+              <LayoutGroup>
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
+                  {filtered.map((edge) => (
+                    <EdgeCard
+                      key={`${edge.outcomeId}:${edge.venue.venue}`}
+                      edge={edge}
+                      isNew={freshlySeen.has(`${edge.outcomeId}:${edge.venue.venue}`)}
+                    />
+                  ))}
+                </div>
+              </LayoutGroup>
+            )}
+          </>
         )}
       </div>
     </PullToRefresh>

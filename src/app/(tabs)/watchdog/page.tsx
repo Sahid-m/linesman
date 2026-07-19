@@ -10,7 +10,7 @@ import { CountUp } from "@/components/linesman/count-up";
 import { EdgeCard } from "@/components/linesman/edge-card";
 import { DisagreementDial } from "@/components/linesman/disagreement-dial";
 import { computeDisagreementIndex } from "@/lib/engine/disagreement";
-import { useVenueSimStore } from "@/lib/store/venue-sim-store";
+import { selectIsFullTime, useVenueSimStore } from "@/lib/store/venue-sim-store";
 import { useMemo } from "react";
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
@@ -23,6 +23,7 @@ export default function WatchdogPage() {
   const playing = useVenueSimStore((state) => state.playing);
   const hydrated = useVenueSimStore((state) => state.hydrated);
   const clearSim = useVenueSimStore((state) => state.clear);
+  const isFullTime = useVenueSimStore(selectIsFullTime);
 
   const key =
     !hydrated ? null : atMs != null ? `/api/watchdog?atMs=${atMs}` : "/api/watchdog";
@@ -40,7 +41,7 @@ export default function WatchdogPage() {
   const summary = data?.summary;
   const status = data?.status;
   const audits = data?.audits ?? [];
-  const edges = data?.edges ?? [];
+  const edges = useMemo(() => data?.edges ?? [], [data]);
   const disagreement = useMemo(() => computeDisagreementIndex(edges), [edges]);
   const isSeeded = status?.mode === "mock" || (status?.mode === "replay" && atMs == null);
 
@@ -71,7 +72,11 @@ export default function WatchdogPage() {
           }}
         >
           <span>
-            {playing ? "Live replay — venue gaps update each minute" : `Filtered to ${simLabel ?? status?.focusFixture?.label}`}
+            {isFullTime
+              ? "Full time — settlement audit below"
+              : playing
+                ? "Live replay — venue gaps update each minute"
+                : `Filtered to ${simLabel ?? status?.focusFixture?.label}`}
           </span>
           <button
             type="button"
@@ -84,7 +89,7 @@ export default function WatchdogPage() {
         </div>
       )}
 
-      {edges.length > 0 && (
+      {!isFullTime && edges.length > 0 && (
         <div className="flex flex-col gap-3">
           <DisagreementDial score={disagreement} />
           <p className="text-xs uppercase tracking-wide text-[color:var(--color-muted)]">
