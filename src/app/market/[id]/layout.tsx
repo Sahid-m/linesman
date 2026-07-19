@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { ReplayBug } from "@/components/linesman/replay-bug";
+import { ViewportFrame } from "@/components/linesman/viewport-frame";
 
 export default function MarketLayout({ children }: { children: ReactNode }) {
   return (
@@ -17,7 +18,7 @@ export default function MarketLayout({ children }: { children: ReactNode }) {
         <span className="font-display text-sm tracking-wide text-[color:var(--color-muted)]">MARKET DETAIL</span>
       </header>
       <main className="mx-auto max-w-[480px] px-4 pb-32 pt-4 md:max-w-2xl lg:max-w-3xl lg:px-8 lg:pb-10 lg:pt-8">
-        {children}
+        <ViewportFrame>{children}</ViewportFrame>
       </main>
     </div>
   );

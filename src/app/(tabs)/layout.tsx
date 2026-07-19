@@ -5,6 +5,7 @@ import { TabBar } from "@/components/linesman/tab-bar";
 import { SideNav } from "@/components/linesman/side-nav";
 import { ReplayBug } from "@/components/linesman/replay-bug";
 import { ShowcaseBanner } from "@/components/linesman/showcase-banner";
+import { ViewportFrame } from "@/components/linesman/viewport-frame";
 
 export default function TabsLayout({ children }: { children: ReactNode }) {
   return (
@@ -19,7 +20,7 @@ export default function TabsLayout({ children }: { children: ReactNode }) {
         </Link>
       </header>
       <main className="mx-auto max-w-[480px] px-4 pb-6 pt-4 md:max-w-3xl lg:max-w-5xl lg:px-10 lg:pt-8 xl:max-w-6xl">
-        {children}
+        <ViewportFrame>{children}</ViewportFrame>
       </main>
       <TabBar />
     </div>

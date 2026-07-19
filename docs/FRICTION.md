@@ -50,3 +50,33 @@ semantically instead of just structurally.
 type their arguments loosely (`unknown`-ish), so `detail-gap-chart.tsx`
 casts to `number` explicitly inside the callbacks rather than fighting the
 generic signature.
+
+**No API maps a TxLINE fixture to a venue market — curation is the answer,
+not automation.** Neither Polymarket nor Kalshi expose "find me the market
+for TxLINE fixture N"; the join only exists in a human's head (team names +
+kickoff time). `data/market-map.json` + `scripts/discover-markets.ts` make
+that one-time human step as cheap as possible — list both sides, hand-pair
+venue market ids, paste the generated skeleton in. This supersedes the
+"No public per-match venue price API" note above: it's still true that
+there's no *automatic* mapping, but `lib/engine/mapping.ts` now gives that
+manual mapping a real, live-priced, de-vigged join once it exists.
+
+**`getFixtureProvenResult` (Watchdog's live audit path) is defensive, not
+verified.** Building the mapped Watchdog audit needed TxLINE's real
+finished-fixture score payload shape (`/api/scores/snapshot/{fixtureId}`),
+but no fixture finished during a live, activated session while this was
+built — there was nothing to sample. It tries several plausible key names
+(`homeGoals`/`homeScore`/`home`/...) and returns `null` (dropping that
+fixture from the audit, never fabricating a verdict) on anything
+unexpected. Whoever runs this live at the hackathon should sample a real
+payload from a finished mapped fixture and tighten `numericFieldFrom`'s key
+list in `lib/sources/txline.ts` if it doesn't match on the first try.
+
+**Polymarket's 1x2 book is three separate binary markets, not one 3-way
+market.** "Will Spain win?", "Will it draw?", "Will Argentina win?" are each
+their own Yes/No Gamma market with their own id and their own (small) vig.
+`lib/engine/mapping.ts` groups the three mapping entries that share a
+fixture+market into one "book" and runs `devigBook()` across all three raw
+Yes prices together before computing each selection's edge — de-vigging
+each one independently against its own 2-outcome Yes/No book would double
+another book's margin into the fair price.

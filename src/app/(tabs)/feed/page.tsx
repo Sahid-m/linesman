@@ -95,7 +95,11 @@ export default function FeedPage() {
             ))}
           </div>
         ) : filtered.length === 0 ? (
-          <EmptyState lastScanAt={data?.generatedAt ?? 0} />
+          <EmptyState
+            lastScanAt={data?.generatedAt ?? 0}
+            isGenuinelyLive={data?.status.mode === "live"}
+            mappedMarkets={data?.status.mappedMarkets ?? 0}
+          />
         ) : (
           <LayoutGroup>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">

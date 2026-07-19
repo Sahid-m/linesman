@@ -32,12 +32,15 @@ prices page.
 flowchart LR
     subgraph Sources
         TXL[TxLINE SSE + REST\nwallet-activated per session]
+        MAP[data/market-map.json\nhand-curated fixture↔venue join]
+        PMID["Polymarket /markets/id\nper mapped selection"]
         PM[Polymarket Gamma API\nWC Winner outright]
         REC[(Neon: recordings\n+ venue_snapshots)]
         MOCK[Seeded deterministic mock]
     end
 
     subgraph Server["Next.js server"]
+        JOIN[lib/engine/mapping.ts\nbook de-vig + join]
         MGR[lib/sources/manager.ts\nlive → replay → mock]
         ENG[devig · edge · watchdog ·\ndisagreement engines]
         VER["/api/verify/score\n→ /api/txline/validate"]
@@ -49,15 +52,20 @@ flowchart LR
         DOG[Watchdog]
         DET[Market Detail]
         REPLAY[Replay tab]
+        SHOW["/showcase"]
     end
 
-    TXL -->|"activated session"| MGR
+    TXL --> JOIN
+    MAP --> JOIN
+    PMID --> JOIN
+    JOIN -->|"≥1 genuine live edge"| MGR
     REC -->|"decoded on read"| MGR
     MOCK -->|"last resort"| MGR
     MGR --> ENG --> FEED
     ENG --> DOG
     PM --> FEED
     FEED --> DET
+    FEED --> SHOW
     DET -->|"Verify on-chain"| VER
     DOG -->|"Verify on-chain"| VER
     VER -->|"validateStatV2 .view()"| SOL[(Solana daily_scores_roots PDA)]
@@ -66,10 +74,62 @@ flowchart LR
 ```
 
 `lib/sources/manager.ts` is the one seam every screen consumes: a live,
-wallet-activated TxLINE session outranks a recorded replay, which outranks
-the seeded mock. Nothing fakes liveness — the Feed's freshness chip always
-names its real source (`LIVE`, `REPLAY`, or `DEMO DATA`), and `/api/status` /
+wallet-activated TxLINE session — joined against a real venue price through
+the curated market map — outranks a recorded replay, which outranks the
+seeded mock. Nothing fakes liveness — the Feed's freshness chip always names
+its real source (`LIVE`, `REPLAY`, or `DEMO DATA`), and `/api/status` /
 `/health` expose the same truth machine-readably.
+
+## Genuine live edges (the mapping layer)
+
+TxLINE's odds feed and Polymarket's Gamma API don't share an id space — no
+public call answers "what's the Polymarket market for TxLINE fixture N".
+`data/market-map.json` is the one hand-curated join that bridges them:
+
+```bash
+RECORDER_SECRET=... RECORDER_USER_ID=<uuid> pnpm discover-markets
+```
+
+This prints every live TxLINE fixture next to every live Polymarket
+World-Cup match market (team names, kickoff, odds, liquidity) and emits a
+ready-to-paste JSON skeleton. Fill in each selection's `venueMarketId`, save
+it to `data/market-map.json`, and:
+
+- `lib/engine/mapping.ts` joins live `SharpLine`s to fresh Polymarket prices
+  by `outcomeId`, de-vigging each fixture's three-market 1x2 book (Home /
+  Draw / Away are each their own binary Yes/No market on Polymarket)
+  together with `devigBook()` before computing EV — never against each
+  selection's own raw 2-way price.
+- The moment ≥1 mapped book resolves live, `lib/sources/manager.ts` flips
+  the whole Feed to `mode: "live"` and **suppresses the mock/replay
+  story entirely** — nothing on screen is ever a mix of real and seeded
+  cards. If the book resolves but nothing clears the EV threshold, the Feed
+  says so proudly instead of falling back (`EmptyState`'s live copy).
+- The Watchdog does the same for settlement: once a mapped venue market
+  closes, `getMappedClosedMarkets` fetches TxLINE's proven score for that
+  fixture and produces a real audit row (see the defensive-parsing caveat
+  in `docs/FRICTION.md`).
+- The recorder (`pnpm record`) persists every mapped market's live price
+  keyed by `outcomeId` alongside the raw sharp packets, so a captured
+  session can be replayed with real venue prices later, not just the
+  World-Cup-outright ticker.
+- `GET /health` and `GET /api/status` report `mappedMarkets` (books
+  configured, regardless of connectivity) and `edgesLive` (real edges
+  currently on screen) so this is verifiable without opening the UI.
+
+## Phone-frame showcase
+
+The primary judged viewport is a phone. Two ways to see it without touching
+your OS window size:
+
+- **`/showcase`** — a cinematic, always-on phone frame with the live,
+  fully interactive app running inside it, a Disagreement dial, and rotating
+  captions. This is the "put it on the projector" route.
+- **Desktop sidebar → Preview → Phone**, or any link with `?view=phone` —
+  frames the *current* route (Feed/Watchdog/Replay/Market Detail) in a real
+  390×844 browsing context (an iframe, not a CSS trick), so every
+  responsive class resolves against a true mobile viewport. Click
+  "← Exit phone preview" or toggle back to Desktop to return.
 
 ## Run it
 
@@ -107,8 +167,11 @@ See [`.env.example`](.env.example) for the full, commented list. Summary:
 | `NEXT_PUBLIC_APP_URL` | no | Absolute origin for callback URLs. |
 | `NEXT_PUBLIC_{DEVNET,MAINNET}_RPC_URL` | no | Solana RPC endpoints. |
 | `SHOWCASE_RECORDING_ID` / `SHOWCASE_SPEED` | no | Which recording + speed the cold-start showcase plays. |
-| `RECORDER_SECRET` / `RECORDER_USER_ID` / `RECORDER_NETWORK` | only for `pnpm record` | Headless recorder auth + which credential to tap. |
+| `RECORDER_SECRET` / `RECORDER_USER_ID` / `RECORDER_NETWORK` | only for `pnpm record` / `pnpm discover-markets` | Headless recorder + fixture-discovery auth + which credential to tap. |
 | `TXLINE_JWT` / `TXLINE_API_TOKEN` / `NETWORK` | only for `pnpm verify` | Headless on-chain proof CLI. |
+
+Curated live mapping needs no new env var — it's just `data/market-map.json`
+on disk (see "Genuine live edges" above).
 
 ## Product tour
 
@@ -120,6 +183,8 @@ See [`.env.example`](.env.example) for the full, commented list. Summary:
   proved? Tap any row to expand and run the on-chain check.
 - **Replay** (`/replay`) — scrub/speed controls over a recorded packet
   trail; the same engine that drives cold-start Showcase mode.
+- **Showcase** (`/showcase`) — presentation-mode phone frame around the
+  live app, for a projector or a judge's first look.
 
 ## TxLINE integration reference (inherited boilerplate)
 

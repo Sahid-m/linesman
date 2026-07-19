@@ -1,0 +1,53 @@
+[
+  {
+    "outcomeId": "txl-999001:1x2:part1",
+    "txline": {
+      "fixtureId": "txl-999001",
+      "market": "1x2",
+      "selection": "part1"
+    },
+    "venues": [
+      {
+        "venue": "polymarket",
+        "venueMarketId": "2941974",
+        "yesMeansSelection": true
+      }
+    ],
+    "mappingConfidence": "exact",
+    "note": "EXAMPLE ONLY — not loaded by the app. Spain vs Argentina, 'Will Spain win?' Yes = Spain (part1). Replace fixtureId with the real numeric TxLINE fixture id from `pnpm discover-markets`, then copy the three selections (part1/draw/part2) for this fixture into data/market-map.json as their own entries so the book can be de-vigged together."
+  },
+  {
+    "outcomeId": "txl-999001:1x2:draw",
+    "txline": {
+      "fixtureId": "txl-999001",
+      "market": "1x2",
+      "selection": "draw"
+    },
+    "venues": [
+      {
+        "venue": "polymarket",
+        "venueMarketId": "2941975",
+        "yesMeansSelection": true
+      }
+    ],
+    "mappingConfidence": "exact",
+    "note": "EXAMPLE ONLY. 'Will Spain vs. Argentina end in a draw?' Yes = draw."
+  },
+  {
+    "outcomeId": "txl-999001:1x2:part2",
+    "txline": {
+      "fixtureId": "txl-999001",
+      "market": "1x2",
+      "selection": "part2"
+    },
+    "venues": [
+      {
+        "venue": "polymarket",
+        "venueMarketId": "2941976",
+        "yesMeansSelection": true
+      }
+    ],
+    "mappingConfidence": "exact",
+    "note": "EXAMPLE ONLY. 'Will Argentina win?' Yes = Argentina (part2)."
+  }
+]

@@ -8,6 +8,8 @@ import type { ClosedMarketRecord, Edge, SharpLine } from "@/lib/types";
 import { getMarketDetail, getMockClosedMarkets, getMockEdges, type MarketDetail } from "@/lib/sources/mock";
 import { getLiveSharpLines, LiveTxlineUnavailableError } from "@/lib/sources/txline";
 import { SHOWCASE_RECORDING_ID, getRecordingPacketCount, getReplaySharpLines } from "@/lib/engine/replay";
+import { getMappedClosedMarkets, getMappedEdges, getMappedMarketCount } from "@/lib/engine/mapping";
+import { filterEdges, rankEdges } from "@/lib/engine/edge";
 
 /**
  * Single source-of-truth facade for "where does this screen's data come
@@ -36,6 +38,10 @@ export interface SourceStatus {
    */
   liveTxlineConnected: boolean;
   liveTxlineLineCount: number;
+  /** Real, priced live edges currently shown (mode === "live"); 0 otherwise. */
+  edgesLive: number;
+  /** Distinct fixture+market books configured in data/market-map.json, regardless of connectivity. */
+  mappedMarkets: number;
 }
 
 const RECORDING_CHECK_TTL_MS = 15_000;
@@ -101,6 +107,37 @@ async function tryLiveSharpLines(): Promise<{ lines: SharpLine[]; identity: Live
 
 export async function getSourceEdges(): Promise<{ edges: Edge[]; status: SourceStatus }> {
   const live = await tryLiveSharpLines();
+  const mappedMarkets = getMappedMarketCount();
+
+  if (live) {
+    try {
+      const mapped = await getMappedEdges(live.lines);
+      // A book actually resolving (real venue prices joined to real TxLINE
+      // lines) is what makes this "live" — even if zero edges clear the EV
+      // threshold, that's still a genuine, live comparison, not a fallback.
+      if (mapped.mappedMarketCount > 0) {
+        const liveEdges = rankEdges(filterEdges(mapped.edges));
+        return {
+          edges: liveEdges,
+          status: {
+            mode: "live",
+            lastPacketAt: Date.now(),
+            packetsTotal: live.lines.length,
+            detail:
+              liveEdges.length > 0
+                ? `${liveEdges.length} genuine live edge${liveEdges.length === 1 ? "" : "s"} across ${mapped.mappedMarketCount} mapped market${mapped.mappedMarketCount === 1 ? "" : "s"}`
+                : `${mapped.mappedMarketCount} mapped market${mapped.mappedMarketCount === 1 ? "" : "s"} checked live — none mispriced right now`,
+            liveTxlineConnected: true,
+            liveTxlineLineCount: live.lines.length,
+            edgesLive: liveEdges.length,
+            mappedMarkets,
+          },
+        };
+      }
+    } catch (error) {
+      console.warn("[sources/manager] live edge mapping failed", error);
+    }
+  }
 
   const recordingCount = await cachedRecordingPacketCount();
   if (recordingCount > 0) {
@@ -116,6 +153,8 @@ export async function getSourceEdges(): Promise<{ edges: Edge[]; status: SourceS
           detail: `Replaying ${recordingCount} recorded TxLINE packets`,
           liveTxlineConnected: live !== null,
           liveTxlineLineCount: live?.lines.length ?? 0,
+          edgesLive: 0,
+          mappedMarkets,
         },
       };
     }
@@ -133,6 +172,8 @@ export async function getSourceEdges(): Promise<{ edges: Edge[]; status: SourceS
         : "Seeded demo data",
       liveTxlineConnected: live !== null,
       liveTxlineLineCount: live?.lines.length ?? 0,
+      edgesLive: 0,
+      mappedMarkets,
     },
   };
 }
@@ -142,6 +183,31 @@ export async function getSourceClosedMarkets(): Promise<{
   status: SourceStatus;
 }> {
   const live = await resolveLiveIdentity();
+  const mappedMarkets = getMappedMarketCount();
+
+  if (live) {
+    try {
+      const liveRecords = await getMappedClosedMarkets(live.userId, live.network);
+      if (liveRecords.length > 0) {
+        return {
+          records: liveRecords,
+          status: {
+            mode: "live",
+            lastPacketAt: Date.now(),
+            packetsTotal: liveRecords.length,
+            detail: `${liveRecords.length} real settlement audit${liveRecords.length === 1 ? "" : "s"} from mapped markets`,
+            liveTxlineConnected: true,
+            liveTxlineLineCount: 0,
+            edgesLive: 0,
+            mappedMarkets,
+          },
+        };
+      }
+    } catch (error) {
+      console.warn("[sources/manager] live closed-market audit failed", error);
+    }
+  }
+
   const recordingCount = await cachedRecordingPacketCount();
   const records = getMockClosedMarkets();
   const mode: SourceMode = recordingCount > 0 ? "replay" : "mock";
@@ -154,6 +220,8 @@ export async function getSourceClosedMarkets(): Promise<{
       detail: mode === "replay" ? `Replaying ${recordingCount} recorded packets` : "Seeded demo data",
       liveTxlineConnected: live !== null,
       liveTxlineLineCount: 0,
+      edgesLive: 0,
+      mappedMarkets,
     },
   };
 }

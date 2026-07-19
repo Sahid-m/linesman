@@ -112,3 +112,61 @@ export async function getLiveSharpLines(userId: string, network: Network): Promi
   }
   return lines;
 }
+
+export interface FixtureProvenResult {
+  fixtureId: string;
+  /** Winning 1x2 selection key, matching `SharpLine.outcomeId`'s selection segment ("part1" | "part2" | "draw"). */
+  winningSelectionKey: "part1" | "part2" | "draw" | null;
+  homeGoals: number;
+  awayGoals: number;
+  raw: unknown;
+}
+
+function numericFieldFrom(record: Record<string, unknown>, keys: string[]): number | null {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value))) return Number(value);
+  }
+  return null;
+}
+
+/**
+ * Best-effort final score for one fixture, used by the mapping engine's
+ * Watchdog audit path. Defensive by design: this hasn't been exercised
+ * against a real finished-fixture payload yet (no live session available
+ * while building it — see docs/FRICTION.md), so it tries several plausible
+ * key names and returns null rather than throwing on anything unexpected.
+ */
+export async function getFixtureProvenResult(
+  userId: string,
+  network: Network,
+  numericFixtureId: number,
+): Promise<FixtureProvenResult | null> {
+  try {
+    const credential = await getCredential(userId, network);
+    if (!credential || credential.setupState !== "activated") return null;
+
+    const payload = await fetchJson(userId, network, `/api/scores/snapshot/${numericFixtureId}`);
+    const root = (payload ?? {}) as Record<string, unknown>;
+    const nested =
+      root.summary && typeof root.summary === "object" ? (root.summary as Record<string, unknown>) : root;
+
+    const homeGoals = numericFieldFrom(nested, ["homeGoals", "homeScore", "home", "Home", "HomeGoals"]);
+    const awayGoals = numericFieldFrom(nested, ["awayGoals", "awayScore", "away", "Away", "AwayGoals"]);
+    if (homeGoals === null || awayGoals === null) return null;
+
+    const winningSelectionKey: FixtureProvenResult["winningSelectionKey"] =
+      homeGoals === awayGoals ? "draw" : homeGoals > awayGoals ? "part1" : "part2";
+
+    return {
+      fixtureId: `txl-${numericFixtureId}`,
+      winningSelectionKey,
+      homeGoals,
+      awayGoals,
+      raw: payload,
+    };
+  } catch {
+    return null;
+  }
+}

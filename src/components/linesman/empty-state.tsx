@@ -1,4 +1,11 @@
-export function EmptyState({ lastScanAt }: { lastScanAt: number }) {
+interface EmptyStateProps {
+  lastScanAt: number;
+  /** When the source is genuinely live (real TxLINE + mapped venue prices), the copy should own that instead of reading like the generic seeded-data placeholder. */
+  isGenuinelyLive?: boolean;
+  mappedMarkets?: number;
+}
+
+export function EmptyState({ lastScanAt, isGenuinelyLive = false, mappedMarkets = 0 }: EmptyStateProps) {
   return (
     <div className="flex flex-col items-center gap-4 rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-6 py-14 text-center">
       <svg width="72" height="52" viewBox="0 0 72 52" fill="none" aria-hidden="true">
@@ -8,12 +15,27 @@ export function EmptyState({ lastScanAt }: { lastScanAt: number }) {
         <path d="M1 26H30" stroke="var(--color-accent)" strokeWidth="2" strokeDasharray="4 4" />
         <path d="M42 26H71" stroke="var(--color-accent)" strokeWidth="2" strokeDasharray="4 4" />
       </svg>
-      <p className="font-display text-xl uppercase tracking-wide text-[color:var(--color-text)]">
-        Markets are efficient right now
-      </p>
-      <p className="max-w-xs text-sm text-[color:var(--color-muted)]">
-        We&rsquo;ll ping you the moment a sharp line and a venue price disagree by enough to matter.
-      </p>
+      {isGenuinelyLive ? (
+        <>
+          <p className="font-display text-xl uppercase tracking-wide text-[color:var(--color-text)]">
+            The market is honest right now
+          </p>
+          <p className="max-w-xs text-sm text-[color:var(--color-muted)]">
+            That&rsquo;s a real result, not a gap in coverage — {mappedMarkets} genuinely live TxLINE‑vs‑Polymarket
+            {mappedMarkets === 1 ? " market" : " markets"} checked this tick, none mispriced past our threshold.
+            We&rsquo;ll surface it the instant one moves.
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="font-display text-xl uppercase tracking-wide text-[color:var(--color-text)]">
+            Markets are efficient right now
+          </p>
+          <p className="max-w-xs text-sm text-[color:var(--color-muted)]">
+            We&rsquo;ll ping you the moment a sharp line and a venue price disagree by enough to matter.
+          </p>
+        </>
+      )}
       <p className="text-xs text-[color:var(--color-muted)]">
         Last scan {new Date(lastScanAt).toLocaleTimeString()}
       </p>

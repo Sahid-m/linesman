@@ -14,7 +14,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "verify": "tsx scripts/verify-cli.ts",
-    "record": "tsx scripts/record.ts"
+    "record": "tsx scripts/record.ts",
+    "discover-markets": "tsx scripts/discover-markets.ts"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",

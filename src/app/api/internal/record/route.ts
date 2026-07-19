@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getLiveSharpLines, LiveTxlineUnavailableError } from "@/lib/sources/txline";
-import { getLiveWinnerMarket } from "@/lib/sources/polymarket";
+import { getLiveWinnerMarket, getPolymarketMarketsByIds } from "@/lib/sources/polymarket";
 import { appendRawPacket, appendVenueSnapshot } from "@/lib/sources/recorder";
+import { loadMarketMap } from "@/lib/engine/mapping";
 
 /**
  * Internal tick endpoint for `pnpm record` (scripts/record.ts). Kept as a
@@ -42,10 +43,45 @@ export async function POST(request: Request) {
   }
 
   if (input.kind === "venue") {
+    let recorded = 0;
     const market = await getLiveWinnerMarket();
-    if (!market) return NextResponse.json({ recorded: 0, reason: "Polymarket unavailable" });
-    await appendVenueSnapshot(input.recordingId, "polymarket", market);
-    return NextResponse.json({ recorded: 1 });
+    if (market) {
+      await appendVenueSnapshot(input.recordingId, "polymarket", market);
+      recorded += 1;
+    }
+
+    // Also snapshot every mapped market's live price, keyed by outcomeId,
+    // so a real recording can be replayed with real venue prices later —
+    // not just the fixed World-Cup-outright ticker above.
+    const mappings = loadMarketMap();
+    const venueIds = mappings
+      .flatMap((mapping) => mapping.venues)
+      .filter((v) => v.venue === "polymarket")
+      .map((v) => v.venueMarketId);
+    if (venueIds.length > 0) {
+      const byId = await getPolymarketMarketsByIds(venueIds);
+      const prices = mappings
+        .map((mapping) => {
+          const venueMapping = mapping.venues.find((v) => v.venue === "polymarket");
+          const resolved = venueMapping ? byId.get(venueMapping.venueMarketId) : undefined;
+          if (!venueMapping || !resolved) return null;
+          return {
+            outcomeId: mapping.outcomeId,
+            venueMarketId: resolved.id,
+            yesPrice: resolved.yesPrice,
+            liquidityUsd: resolved.liquidityUsd,
+            closed: resolved.closed,
+          };
+        })
+        .filter((entry): entry is NonNullable<typeof entry> => !!entry);
+      if (prices.length > 0) {
+        await appendVenueSnapshot(input.recordingId, "polymarket-mapped", { prices });
+        recorded += 1;
+      }
+    }
+
+    if (recorded === 0) return NextResponse.json({ recorded: 0, reason: "Polymarket unavailable" });
+    return NextResponse.json({ recorded });
   }
 
   try {

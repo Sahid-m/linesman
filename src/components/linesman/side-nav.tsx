@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useViewportStore } from "@/lib/store/viewport-store";
 
 const TABS = [
   { href: "/feed", label: "Edge Feed", icon: "⚡" },
@@ -11,6 +12,8 @@ const TABS = [
 
 export function SideNav() {
   const pathname = usePathname();
+  const mode = useViewportStore((state) => state.mode);
+  const setMode = useViewportStore((state) => state.setMode);
 
   return (
     <nav
@@ -42,6 +45,29 @@ export function SideNav() {
             </Link>
           );
         })}
+      </div>
+
+      <div className="mt-8">
+        <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-[color:var(--color-muted)]">
+          Preview
+        </p>
+        <div className="flex rounded-full border border-[color:var(--color-border)] p-1">
+          {(["desktop", "phone"] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => setMode(option)}
+              className="min-h-9 flex-1 rounded-full px-3 text-xs font-semibold capitalize transition-colors"
+              style={{
+                color: mode === option ? "var(--color-bg)" : "var(--color-muted)",
+                background: mode === option ? "var(--color-accent)" : "transparent",
+              }}
+              aria-pressed={mode === option}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="mt-auto rounded-xl border border-[color:var(--color-border)] p-3.5 text-xs text-[color:var(--color-muted)]">

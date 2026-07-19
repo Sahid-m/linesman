@@ -31,16 +31,20 @@ All of the above (except `/auth/guest/start`) require `Authorization: Bearer <jw
 
 | Endpoint | Used by | Purpose |
 |---|---|---|
-| `https://gamma-api.polymarket.com/events/slug/world-cup-winner` | `lib/sources/polymarket.ts` → `api/live/winner-market` → `LiveTicker` | Real, public World Cup Winner outright market — the one genuinely live non-TxLINE price feed wired into the ticker today. |
+| `https://gamma-api.polymarket.com/events/slug/world-cup-winner` | `lib/sources/polymarket.ts` → `api/live/winner-market` → `LiveTicker` | Real, public World Cup Winner outright market — the fixed non-TxLINE price feed wired into the ticker. |
+| `https://gamma-api.polymarket.com/markets/{id}` | `lib/sources/polymarket.ts#getPolymarketMarketById(s)` → `lib/engine/mapping.ts` | Single-market lookup by id — resolves the venue side of a hand-curated `data/market-map.json` entry into a live Yes price + liquidity + closed state. |
+| `https://gamma-api.polymarket.com/events?tag_slug=fifa-world-cup` | `scripts/discover-markets.ts` | Lists live World-Cup match markets so a human can pair them against TxLINE fixtures. |
 
 ## This app's own API (for judges / `/health` backup requirement)
 
 | Route | Purpose |
 |---|---|
-| `GET /health` | `{ ok, mode, lastPacketAt, dbOk, version }` — liveness probe. |
-| `GET /api/status` | Current `SourceStatus` (live/replay/mock + packet counts). |
-| `GET /api/edges` | Ranked mispricing edges for the Feed, routed through `lib/sources/manager.ts`. |
-| `GET /api/watchdog` | Settlement audits + summary for the Watchdog tab. |
+| `GET /health` | `{ ok, mode, lastPacketAt, dbOk, version, edgesLive, mappedMarkets }` — liveness probe. |
+| `GET /api/status` | Current `SourceStatus` (live/replay/mock + packet counts + `edgesLive`/`mappedMarkets`). |
+| `GET /api/edges` | Ranked mispricing edges for the Feed, routed through `lib/sources/manager.ts` (live-mapped → replay → mock). |
+| `GET /api/watchdog` | Settlement audits + summary for the Watchdog tab (real audits for mapped+closed markets when available). |
 | `POST /api/verify/score` | Graceful-ladder wrapper around the on-chain `validateStatV2` check. |
 | `GET /api/live/winner-market` | Live Polymarket World Cup Winner snapshot. |
-| `POST /api/internal/record` | Secret-protected tick endpoint for `pnpm record` (see `lib/sources/recorder.ts`). |
+| `POST /api/internal/record` | Secret-protected tick endpoint for `pnpm record` (see `lib/sources/recorder.ts`); on `kind: "venue"` also snapshots every mapped market's live price keyed by `outcomeId`. |
+| `POST /api/internal/discover-fixtures` | Secret-protected tick endpoint for `pnpm discover-markets` — same server-only-import workaround as `/api/internal/record`. |
+| `GET /showcase` | Judge-facing presentation route: cinematic phone frame around the live, interactive app + Disagreement dial + rotating captions. |

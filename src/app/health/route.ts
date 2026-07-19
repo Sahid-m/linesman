@@ -14,6 +14,8 @@ export async function GET() {
     lastPacketAt: status.lastPacketAt,
     packetsTotal: status.packetsTotal,
     liveTxlineConnected: status.liveTxlineConnected,
+    edgesLive: status.edgesLive,
+    mappedMarkets: status.mappedMarkets,
     dbOk,
     version: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? packageJson.version,
     checkedAt: Date.now(),
