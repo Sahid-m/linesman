@@ -1,4 +1,5 @@
 import {
+  boolean,
   check,
   index,
   integer,
@@ -215,6 +216,34 @@ export const agentVenueObservations = pgTable("agent_venue_observations", {
   observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
   reactionMs: integer("reaction_ms"),
   createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+export const agentRiskLevel = pgEnum("agent_risk_level", [
+  "conservative",
+  "balanced",
+  "aggressive",
+]);
+
+/**
+ * User-facing bot configuration the GroundTruth agent reads before every
+ * decision: how much to stake, the minimum cross-venue price gap worth
+ * acting on, and whether auto-trading is armed. One row per network.
+ */
+export const agentConfig = pgTable("agent_config", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  network: network("network").notNull().unique(),
+  riskLevel: agentRiskLevel("risk_level").notNull().default("balanced"),
+  maxStakePerTrade: numeric("max_stake_per_trade", { precision: 12, scale: 4 })
+    .notNull()
+    .default("100.0000"),
+  minEdgePct: numeric("min_edge_pct", { precision: 6, scale: 4 })
+    .notNull()
+    .default("1.5000"),
+  autoTrade: boolean("auto_trade").notNull().default(true),
+  notes: text("notes"),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
 });

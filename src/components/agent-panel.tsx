@@ -224,9 +224,11 @@ export function AgentPanel({ fixtureId }: { fixtureId?: number }) {
   if (positions.length === 0) {
     return (
       <div className="rounded-2xl border border-dashed border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-6 text-sm text-[color:var(--color-muted)]">
-        No decisions recorded yet for this network. Run{" "}
-        <code className="text-[color:var(--color-text)]">pnpm agent:run</code> against a
-        fixture to populate the feed.
+        No decisions on this network yet. Set your risk appetite in{" "}
+        <a href="/agent/settings" className="text-[color:var(--color-accent)] underline-offset-2 hover:underline">
+          agent settings
+        </a>{" "}
+        and GroundTruth will trade the next detected event on your behalf.
       </div>
     );
   }

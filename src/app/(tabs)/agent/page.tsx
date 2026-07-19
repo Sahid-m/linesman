@@ -1,4 +1,5 @@
 import { AgentPanel } from "@/components/agent-panel";
+import { AgentProfileBanner } from "@/components/agent-profile-banner";
 
 export default function AgentPage() {
   return (
@@ -16,6 +17,7 @@ export default function AgentPage() {
           on Solana, and grades the book against an on-chain proof of the final score.
         </p>
       </header>
+      <AgentProfileBanner />
       <AgentPanel />
     </section>
   );

@@ -12,6 +12,7 @@ import {
 } from "@/lib/markets/polymarket";
 import { fetchSxBetPrice } from "@/lib/markets/sxbet";
 import type { TeamNames, VenuePrice } from "@/lib/markets/types";
+import { getAgentConfig } from "./config";
 import type { GroundTruthEvent } from "./detector";
 import { logDecisionMemo } from "./memo";
 import { generateTradeRationale } from "./rationale";
@@ -20,7 +21,6 @@ import { pickCounterpartyAndFairValue, type VenueReaction } from "./reaction";
 const REACTION_THRESHOLD_PCT = 1.5;
 const REACTION_WINDOW_MS = 5 * 60_000;
 const POLL_INTERVAL_MS = 30_000;
-const TRADE_SIZE = "100.0000";
 
 export type FixtureContext = {
   network: Network;
@@ -134,6 +134,11 @@ export async function processGroundTruthEvent(
 ): Promise<void> {
   if (!event.side) return;
 
+  // Bot settings gate the whole loop: if auto-trade is off the agent is
+  // paused, and every decision honours the configured stake + min edge.
+  const config = await getAgentConfig(ctx.network);
+  if (!config.autoTrade) return;
+
   const beforeSnapshots = await gatherVenueSnapshots(
     ctx,
     eventTimestampMs - 60_000,
@@ -153,7 +158,12 @@ export async function processGroundTruthEvent(
     decision.counterparty.snapshot,
     event.side,
   );
-  if (entryPct === null) return;
+  const fairPct = impliedPctForSide(decision.fairValueSource.snapshot, event.side);
+  if (entryPct === null || fairPct === null) return;
+
+  // Only act when the cross-venue gap clears the configured risk threshold.
+  const edgePct = fairPct - entryPct;
+  if (edgePct < config.minEdgePct) return;
 
   const db = getDb();
   const [position] = await db
@@ -166,7 +176,7 @@ export async function processGroundTruthEvent(
       eventAction: event.action,
       side: event.side,
       counterpartyVenue: decision.counterparty.snapshot.venue,
-      size: TRADE_SIZE,
+      size: config.maxStakePerTrade.toFixed(4),
       entryFairValue: (entryPct / 100).toFixed(4),
     })
     .onConflictDoNothing({
