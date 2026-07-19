@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useId, useState } from "react";
 import { createPortal } from "react-dom";
 import { mutate } from "swr";
+import { useWallet } from "@solana/wallet-adapter-react";
 import { useNetwork } from "@/components/app-providers";
 import { WalletSession } from "@/components/wallet-session";
 import { TxlineSetup } from "@/components/txline-setup";
@@ -19,12 +20,14 @@ type Props = {
 export function ConnectWalletControl({ variant = "nav" }: Props) {
   const titleId = useId();
   const { network, setNetwork } = useNetwork();
+  const wallet = useWallet();
   const [open, setOpen] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
   const [ready, setReady] = useState(false);
   const [setupBusy, setSetupBusy] = useState(false);
   const [walletLabel, setWalletLabel] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -99,6 +102,29 @@ export function ConnectWalletControl({ variant = "nav" }: Props) {
     },
     [refreshStatus],
   );
+
+  const handleDisconnect = useCallback(async () => {
+    setDisconnecting(true);
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+      if (wallet.connected) {
+        try {
+          await wallet.disconnect();
+        } catch {
+          // ignore adapter disconnect races
+        }
+      }
+      setAuthenticated(false);
+      setReady(false);
+      setWalletLabel(null);
+      void mutate("/api/status");
+      void mutate("/api/edges");
+      void mutate("/api/live/lines");
+      void refreshStatus();
+    } finally {
+      setDisconnecting(false);
+    }
+  }, [refreshStatus, wallet]);
 
   const triggerLabel = ready
     ? `Live · ${walletLabel ?? "wallet"}`
@@ -224,6 +250,16 @@ export function ConnectWalletControl({ variant = "nav" }: Props) {
                     : "Step 1: connect, then sign in with your wallet."}
               </p>
               <div className="flex shrink-0 items-center gap-2">
+                {authenticated && (
+                  <button
+                    type="button"
+                    disabled={setupBusy || disconnecting}
+                    onClick={() => void handleDisconnect()}
+                    className="rounded-xl border border-[color:var(--color-border)] px-3.5 py-2 text-sm font-semibold text-[color:var(--color-muted)] transition-colors hover:border-[color:var(--color-alert)] hover:text-[color:var(--color-alert)] disabled:opacity-50"
+                  >
+                    {disconnecting ? "Disconnecting…" : "Disconnect wallet"}
+                  </button>
+                )}
                 {ready && (
                   <Link
                     href="/replay"
