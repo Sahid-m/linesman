@@ -71,7 +71,7 @@ export default function WatchdogPage() {
           }}
         >
           <span>
-            {playing ? "Simulation running — live venue gaps below" : `Filtered to ${simLabel ?? status?.focusFixture?.label}`}
+            {playing ? "Live replay — venue gaps update each minute" : `Filtered to ${simLabel ?? status?.focusFixture?.label}`}
           </span>
           <button
             type="button"

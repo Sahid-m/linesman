@@ -116,7 +116,7 @@ export default function FeedPage() {
           >
             <span className="min-w-0 flex-1">
               {data?.status.detail ||
-                (playing ? "Simulation running — prices update every match-minute" : "Focused from Replay")}
+                (playing ? "Live replay — prices move each match-minute" : "Pinned from Replay")}
             </span>
             <button
               type="button"
