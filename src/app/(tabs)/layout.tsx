@@ -5,7 +5,7 @@ import { LiveTicker } from "@/components/linesman/live-ticker";
 import { TabBar } from "@/components/linesman/tab-bar";
 import { SideNav } from "@/components/linesman/side-nav";
 import { ReplayBug } from "@/components/linesman/replay-bug";
-import { ShowcaseBanner } from "@/components/linesman/showcase-banner";
+import { ShowcaseToast } from "@/components/linesman/showcase-toast";
 import { VenueSimBanner } from "@/components/linesman/venue-sim-banner";
 import { VenueSimClock } from "@/components/linesman/venue-sim-clock";
 import { PhonePreviewGate } from "@/components/linesman/phone-preview-gate";
@@ -18,7 +18,7 @@ export default function TabsLayout({ children }: { children: ReactNode }) {
         <ReplayBug />
         <SideNav />
         <LiveTicker />
-        <ShowcaseBanner />
+        <ShowcaseToast />
         <VenueSimBanner />
         <header className="mx-auto flex max-w-[480px] items-center justify-between px-4 py-3 lg:hidden">
           <Link href="/feed" className="font-display text-xl tracking-wide text-[color:var(--color-text)]">
