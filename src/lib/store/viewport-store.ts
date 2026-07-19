@@ -13,7 +13,7 @@ interface ViewportState {
  * Desktop/Phone preview toggle — lets a judge or teammate see the mobile
  * layout (the primary judged viewport) without shrinking the actual browser
  * window. Persisted so it survives a refresh; `?view=phone` in the URL can
- * still force it per-page (see `viewport-frame.tsx`) without touching this.
+ * still force it (see `phone-preview-overlay.tsx`) without touching this.
  */
 export const useViewportStore = create<ViewportState>()(
   persist(

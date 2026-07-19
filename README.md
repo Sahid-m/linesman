@@ -10,6 +10,7 @@ Linesman joins TxLINE’s Merkle-anchored fair value to live Polymarket and Kals
 - **Match clock / venue sim** → `/replay`
 - **Trust model** → [`docs/ONCHAIN.md`](docs/ONCHAIN.md)
 - **Product brief** → [`PRODUCT_BRIEF.md`](PRODUCT_BRIEF.md)
+- **Technical design doc** → [`TECHNICAL_DESIGN.md`](TECHNICAL_DESIGN.md)
 - **Liveness** → `GET /health`
 
 ## Why this wins
@@ -144,6 +145,7 @@ See [`.env.example`](.env.example). Core: `DATABASE_URL`, `CREDENTIAL_ENCRYPTION
 | Doc | Purpose |
 | --- | --- |
 | [`PRODUCT_BRIEF.md`](PRODUCT_BRIEF.md) | Judge-facing pitch |
+| [`TECHNICAL_DESIGN.md`](TECHNICAL_DESIGN.md) | Deep architecture reference — every subsystem, diagrammed and code-linked |
 | [`docs/ONCHAIN.md`](docs/ONCHAIN.md) | Proof / trust model |
 | [`docs/ENDPOINTS.md`](docs/ENDPOINTS.md) | API map |
 | [`docs/FRICTION.md`](docs/FRICTION.md) | Integration notes for organizers |
